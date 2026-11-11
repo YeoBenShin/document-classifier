@@ -9,6 +9,13 @@ input folder ──> doc-categoriser extract ──> folder of extracted JSON �
                   (pdfplumber, OCR)                                         (local GGUF model)                                         (in place, no overwrite)
 ```
 
+`doc-categoriser run` runs the three stages one after the other in one process. `doc-categoriser web` serves a page in the web browser that queues folders, and runs `doc-categoriser run` for each folder in a child process:
+
+```
+browser page ──HTTP (poll each second)──> web server ──> job queue thread ──> child process: python -m doc_categoriser run <folder> <decisions folder>/<job>
+                                                              <── stdout + stderr lines (the log), exit code
+```
+
 - `src/doc_categoriser/`: the library and the CLI. `extraction/`, `classification/` and `renaming/` hold one stage each. See its `ARCHITECTURE.md`.
 - `tests/`: tests at the public seams (library and CLI). See its `ARCHITECTURE.md`.
 - `models/` (not committed): the GGUF model files.
@@ -60,6 +67,24 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 
 - The rename changes the operator's files, and a wrong name from the model is likely sometimes. Thus it is a separate command that the operator runs after examining the suggestions, with `--dry-run` to see the result first.
 - `rename` reads only the name suggestion JSON, not the model. It is fast and needs no model file.
+
+### One command for the full pipeline
+
+- `run` joins the three stages, so the web interface starts one child process for each folder and only reads its output. The log in the interface is the same text that an operator sees in a terminal.
+- `run` renames without a pause for review. It is for folders where the operator accepts the model names. The three separate commands stay for a review before the rename.
+- `run` deletes its extracted JSON when the renaming stage has finished. See `src/doc_categoriser/ARCHITECTURE.md`.
+- `run` loads the model before extraction. A model file that cannot load stops the run at once with exit code 2, before OCR (slow) and before any change.
+
+### Web interface
+
+- The interface is for operators who do not use a terminal. It runs on the operator's computer only, and no document leaves it.
+- The pipeline runs in a child process, not in a thread of the server. Cancel then stops it at once (the process is terminated), also during a long OCR or model call, which a thread cannot do. A crash in llama.cpp or OCR also does not stop the server.
+- One folder runs at a time. Each run loads the model (2.7 GB), and two at a time would need twice the memory on a 16 GB laptop and be no faster on its CPU.
+- The server uses only the Python standard library (`http.server`). On the target laptop, each new third-party package needs approval. The page is one HTML file with plain JavaScript and no build step.
+- The page polls for the queue and the new log lines each second, instead of a push connection. It is simple, and the log of a long run needs no faster updates.
+- Each folder gets its own subfolder in the decisions folder, named with the folder name, the time and the job number. Two runs of one folder, or two folders with the same name, do not mix their JSON files.
+- A cancelled run is not undone. Each rename is one file system operation, so a file has either its old name or its new name. Renames before the cancel are kept.
+- Protection against other web sites in the same browser: the server listens on `127.0.0.1` only, refuses a `Host` header that is not this computer (DNS rebinding), and accepts only `application/json` POST bodies (a form from another site cannot send JSON without a CORS preflight, which the server never allows).
 
 ### Constrained output
 

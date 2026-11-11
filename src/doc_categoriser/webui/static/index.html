@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Document Renamer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --border: #dde1e7;
+    --accent: #2f6fde; --accent-text: #ffffff; --hover: #eef3fc; --log-bg: #12161f; --log-text: #d7dde8;
+    --queued: #8a94a6; --running: #2f6fde; --succeeded: #1f9254; --warning: #b7791f; --failed: #c53030; --cancelled: #6b7280;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11141a; --panel: #1a1e26; --text: #e6e9ef; --muted: #98a2b3; --border: #2c323d;
+      --accent: #5b8ff0; --hover: #222a38; --log-bg: #0b0d12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { margin: 0 0 10px; font-size: 18px; }
+  .settings { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; max-width: 980px; }
+  .settings label { color: var(--muted); }
+  input[type=text] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+  h2 { margin: 0 0 10px; font-size: 15px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--hover); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button.danger { color: var(--failed); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > input[type=text] { flex: 1; min-width: 0; }
+  .folder-list { list-style: none; margin: 10px 0; padding: 0; border: 1px solid var(--border); border-radius: 6px; max-height: 340px; overflow: auto; }
+  .folder-list li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .folder-list li:last-child { border-bottom: none; }
+  .folder-list li:hover { background: var(--hover); }
+  .folder-list .name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-list .name:hover { text-decoration: underline; }
+  .empty { color: var(--muted); padding: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--hover); max-width: 100%; }
+  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip button { border: none; padding: 0 6px; background: transparent; }
+  .muted { color: var(--muted); }
+  .error { color: var(--failed); min-height: 1.4em; margin: 6px 0 0; }
+  .jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .job { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+  .job.selected { border-color: var(--accent); background: var(--hover); }
+  .job .info { flex: 1; min-width: 0; }
+  .job .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job .path { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
+  .badge.queued { background: var(--queued); } .badge.running { background: var(--running); }
+  .badge.succeeded { background: var(--succeeded); } .badge.finished_with_errors { background: var(--warning); }
+  .badge.failed { background: var(--failed); } .badge.cancelled { background: var(--cancelled); }
+  .log-header { margin-top: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .log-header .path { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  pre.log { margin: 6px 0 0; background: var(--log-bg); color: var(--log-text); padding: 10px; border-radius: 6px; height: 360px; overflow: auto; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Document Renamer</h1>
+  <div class="settings">
+    <label for="output-dir">Decisions folder</label>
+    <input type="text" id="output-dir" spellcheck="false" title="Each queued folder gets a subfolder here with its extracted and name suggestion JSON files.">
+    <label for="model-path">Model file</label>
+    <input type="text" id="model-path" spellcheck="false">
+  </div>
+</header>
+<main>
+  <section aria-labelledby="browse-title">
+    <h2 id="browse-title">Folders</h2>
+    <div class="row">
+      <button id="up-button" title="Parent folder">&uarr; Up</button>
+      <input type="text" id="current-path" spellcheck="false" aria-label="Current folder">
+      <button id="go-button">Open</button>
+    </div>
+    <label class="row" style="margin-top:8px"><input type="checkbox" id="select-current"> Select this folder</label>
+    <ul class="folder-list" id="folder-list"></ul>
+    <div class="muted">Selected folders (each runs extraction, naming and renaming):</div>
+    <div class="chips" id="selected-folders"></div>
+    <button class="primary" id="queue-button" disabled>Add to queue</button>
+    <p class="error" id="browse-error" role="alert"></p>
+  </section>
+  <section aria-labelledby="queue-title">
+    <h2 id="queue-title">Queue</h2>
+    <ul class="jobs" id="job-list"></ul>
+    <div class="log-header">
+      <strong id="log-title">Log</strong>
+      <span class="path" id="log-work-dir"></span>
+    </div>
+    <pre class="log" id="log" aria-live="polite"></pre>
+  </section>
+</main>
+<script>
+"use strict";
+const STATUS_LABELS = {
+  queued: "Queued", running: "Running", succeeded: "Done", finished_with_errors: "Done with errors",
+  failed: "Failed", cancelled: "Cancelled",
+};
+const FINAL_STATUSES = new Set(["succeeded", "finished_with_errors", "failed", "cancelled"]);
+const state = { listing: null, selected: new Set(), jobs: [], logJobId: null, logNext: 0 };
+const element = (id) => document.getElementById(id);
+
+async function api(method, path, body) {
+  const options = { method, headers: {} };
+  if (body !== undefined) { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
+  const response = await fetch(path, options);
+  const content = await response.json();
+  if (!response.ok) throw new Error(content.error || response.statusText);
+  return content;
+}
+
+function folderName(path) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+
+async function openFolder(path) {
+  try {
+    state.listing = await api("GET", "/api/folders" + (path ? "?path=" + encodeURIComponent(path) : ""));
+    element("browse-error").textContent = "";
+    renderFolders();
+  } catch (error) {
+    element("browse-error").textContent = error.message;
+  }
+}
+
+function toggleSelection(path, selected) {
+  if (selected) state.selected.add(path); else state.selected.delete(path);
+  renderFolders();
+}
+
+function renderFolders() {
+  const listing = state.listing;
+  element("current-path").value = listing.path;
+  element("up-button").disabled = !listing.parent;
+  element("select-current").checked = state.selected.has(listing.path);
+  const list = element("folder-list");
+  list.replaceChildren();
+  if (!listing.folders.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "No subfolders.";
+    list.append(empty);
+  }
+  for (const folder of listing.folders) {
+    const item = document.createElement("li");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.selected.has(folder.path);
+    checkbox.setAttribute("aria-label", "Select " + folder.name);
+    checkbox.addEventListener("change", () => toggleSelection(folder.path, checkbox.checked));
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = "\u{1F4C1} " + folder.name;
+    name.title = "Open " + folder.path;
+    name.addEventListener("click", () => openFolder(folder.path));
+    item.append(checkbox, name);
+    list.append(item);
+  }
+  const chips = element("selected-folders");
+  chips.replaceChildren();
+  for (const path of state.selected) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.title = path;
+    const label = document.createElement("span");
+    label.textContent = folderName(path);
+    const remove = document.createElement("button");
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", "Remove " + path);
+    remove.addEventListener("click", () => toggleSelection(path, false));
+    chip.append(label, remove);
+    chips.append(chip);
+  }
+  if (!state.selected.size) {
+    const none = document.createElement("span");
+    none.className = "muted";
+    none.textContent = "None";
+    chips.append(none);
+  }
+  const queueButton = element("queue-button");
+  queueButton.disabled = !state.selected.size;
+  queueButton.textContent = state.selected.size > 1 ? `Add ${state.selected.size} folders to queue` : "Add to queue";
+}
+
+async function queueSelected() {
+  try {
+    const result = await api("POST", "/api/jobs", {
+      folders: [...state.selected],
+      output_dir: element("output-dir").value.trim(),
+      model_path: element("model-path").value.trim(),
+    });
+    state.selected.clear();
+    element("browse-error").textContent = "";
+    renderFolders();
+    if (state.logJobId === null && result.jobs.length) selectJob(result.jobs[0].id);
+    await refreshJobs();
+  } catch (error) {
+    element("browse-error").textContent = error.message;
+  }
+}
+
+async function cancelJob(jobId) {
+  try {
+    await api("POST", `/api/jobs/${jobId}/cancel`, {});
+  } catch (error) {
+    element("browse-error").textContent = error.message;
+  }
+  await refreshJobs();
+}
+
+function selectJob(jobId) {
+  state.logJobId = jobId;
+  state.logNext = 0;
+  element("log").textContent = "";
+  renderJobs();
+  refreshLog();
+}
+
+function renderJobs() {
+  const list = element("job-list");
+  list.replaceChildren();
+  if (!state.jobs.length) {
+    const empty = document.createElement("li");
+    empty.className = "muted";
+    empty.textContent = "No folders queued yet.";
+    list.append(empty);
+  }
+  for (const job of state.jobs) {
+    const item = document.createElement("li");
+    item.className = "job" + (job.id === state.logJobId ? " selected" : "");
+    item.dataset.jobId = job.id;
+    item.addEventListener("click", () => selectJob(job.id));
+    const info = document.createElement("div");
+    info.className = "info";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = `#${job.id} ${folderName(job.input_dir)}`;
+    const path = document.createElement("div");
+    path.className = "path";
+    path.textContent = job.input_dir;
+    path.title = job.input_dir;
+    info.append(title, path);
+    const badge = document.createElement("span");
+    badge.className = "badge " + job.status;
+    badge.textContent = STATUS_LABELS[job.status] || job.status;
+    item.append(info, badge);
+    if (!FINAL_STATUSES.has(job.status)) {
+      const cancel = document.createElement("button");
+      cancel.className = "danger";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", (event) => { event.stopPropagation(); cancelJob(job.id); });
+      item.append(cancel);
+    }
+    list.append(item);
+  }
+  const job = state.jobs.find((candidate) => candidate.id === state.logJobId);
+  element("log-title").textContent = job ? `Log of #${job.id} ${folderName(job.input_dir)}` : "Log";
+  element("log-work-dir").textContent = job ? "Decisions: " + job.work_dir : "";
+}
+
+async function refreshJobs() {
+  try {
+    state.jobs = (await api("GET", "/api/jobs")).jobs;
+    renderJobs();
+  } catch (error) {
+    element("browse-error").textContent = "Cannot reach the server: " + error.message;
+  }
+}
+
+async function refreshLog() {
+  const jobId = state.logJobId;
+  if (jobId === null) return;
+  const result = await api("GET", `/api/jobs/${jobId}/log?since=${state.logNext}`);
+  if (jobId !== state.logJobId || !result.lines.length) return;
+  const log = element("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  log.textContent += result.lines.join("\n") + "\n";
+  state.logNext = result.next;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+async function poll() {
+  await refreshJobs();
+  try { await refreshLog(); } catch (error) { /* shown by refreshJobs */ }
+  setTimeout(poll, 1000);
+}
+
+async function start() {
+  const config = await api("GET", "/api/config");
+  element("output-dir").value = config.default_output_dir;
+  element("model-path").value = config.default_model_path;
+  element("up-button").addEventListener("click", () => state.listing.parent && openFolder(state.listing.parent));
+  element("go-button").addEventListener("click", () => openFolder(element("current-path").value.trim()));
+  element("current-path").addEventListener("keydown", (event) => { if (event.key === "Enter") openFolder(event.target.value.trim()); });
+  element("select-current").addEventListener("change", (event) => toggleSelection(state.listing.path, event.target.checked));
+  element("queue-button").addEventListener("click", queueSelected);
+  await openFolder(config.root_dir);
+  poll();
+}
+
+start();
+</script>
+</body>
+</html>

@@ -463,3 +463,93 @@ def test_rename_rejects_a_missing_folder(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "is not a folder" in result.stderr
+
+
+def run_pipeline(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
+    """Run `doc-categoriser run <arguments>` and capture its output."""
+    return subprocess.run(
+        [str(CLI_EXECUTABLE), "run", *(str(argument) for argument in arguments)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_run_extracts_names_and_renames_and_keeps_the_decisions_in_the_work_folder(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_text_pdf(
+        "scan_0001.pdf",
+        [["DBS Bank Statement", "Statement period 01/03/2026 - 31/03/2026", "Closing balance 980.40"]],
+    ).rename(input_dir / "scan_0001.pdf")
+    work_dir = tmp_path / "renaming-decision" / "inbox-run"
+
+    result = run_pipeline(input_dir, work_dir, "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    decision = json.loads((work_dir / "named" / "scan_0001.pdf.json").read_text(encoding="utf-8"))
+    assert not (work_dir / "extracted").exists()
+    assert decision["source_path"] == str((input_dir / "scan_0001.pdf").resolve())
+    assert file_names(input_dir) == [decision["suggested_name"]]
+    stage_positions = [result.stdout.index(stage) for stage in ["Extraction", "Naming", "Renaming"]]
+    assert stage_positions == sorted(stage_positions)
+    assert "Extracted 1, skipped 0, failed 0" in result.stdout
+    assert "Named 1, failed 0" in result.stdout
+    assert "Renamed 1, already renamed 0, failed 0" in result.stdout
+
+
+def test_run_ignores_its_own_work_folder_inside_the_input_folder(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_text_pdf("statement.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "statement.pdf")
+    work_dir = input_dir / "renaming-decision" / "inbox-run"
+
+    result = run_pipeline(input_dir, work_dir, "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Extracted 1, skipped 0, failed 0" in result.stdout
+    assert sorted(path.name for path in (work_dir / "named").rglob("*.json")) == ["statement.pdf.json"]
+
+
+def test_run_reports_failed_documents_renames_the_others_and_exits_non_zero(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    (input_dir / "a_broken.pdf").write_bytes(b"this is not a pdf")
+    make_text_pdf("statement.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "statement.pdf")
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 1
+    assert "Failed: a_broken.pdf" in result.stderr
+    assert "Renamed 1, already renamed 0, failed 0" in result.stdout
+    assert "a_broken.pdf" in file_names(input_dir)
+    assert not (tmp_path / "work" / "extracted").exists()
+
+
+@pytest.mark.parametrize(
+    ("problem", "expected_message"),
+    [("missing_input_folder", "is not a folder"), ("missing_model", "is not a file")],
+)
+def test_run_rejects_incorrect_arguments_before_it_changes_anything(
+    tmp_path: Path, test_model_path: Path, problem: str, expected_message: str
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    (input_dir / "statement.pdf").write_bytes(b"statement")
+    model_path = test_model_path
+    if problem == "missing_input_folder":
+        input_dir = tmp_path / "does_not_exist"
+    else:
+        model_path = tmp_path / "missing.gguf"
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", model_path)
+
+    assert result.returncode == 2
+    assert expected_message in result.stderr
+    assert not (tmp_path / "work").exists()
