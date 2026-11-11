@@ -60,7 +60,7 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 
 ### Names from content, no categories
 
-- The documents are not sorted into fixed categories. Each name is `YYYY-MM-DD-<name>`: the document date, then a descriptive part from the content only. The instructions say what a useful descriptive part holds (who issued it, what it is), but do not set a format. Thus the word order in that part can differ between documents. The program changes spaces and `_` to `-`, so all names use one separator.
+- The documents are not sorted into fixed categories. Each name is `YYYY-MM-DD-<name>`: the document date, then a descriptive part from the content only. The instructions say what a useful descriptive part holds (who issued it, what it is), but do not set a format. Thus the word order in that part can differ between documents. The program changes spaces and `_` to `-`, so all names use one separator. At rename, the name of the folder of the document goes in front: `<folder>-YYYY-MM-DD-<name>` (see `src/doc_categoriser/renaming/ARCHITECTURE.md`).
 - `name` writes suggestions only and renames no file. The operator can examine (and edit) the names before `rename` applies them.
 
 ### Separate rename stage

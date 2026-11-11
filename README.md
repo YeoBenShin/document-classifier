@@ -95,7 +95,7 @@ Output file:
 
 ### rename
 
-- Reads every `.json` file under `<named_dir>`. For each, renames the file at `source_path` to `suggested_name`, in the same folder.
+- Reads every `.json` file under `<named_dir>`. For each, renames the file at `source_path` to `<folder>-<suggested_name>`, in the same folder. `<folder>` is the name of the folder that holds the file, with spaces and `_` changed to `-` (`Bank Statements/scan.pdf` becomes `Bank-Statements-2026-03-31-DBS-Bank-Statement.pdf`).
 - `--dry-run`: shows what would be renamed, and changes no file.
 - A file is never overwritten. If a different file already has the name, or two documents of one folder get the same name, the document is reported as failed and is not renamed.
 - The suggested name must be one file name (no `/`, `\`, `..`) with the same extension as the source. Otherwise the document fails. The JSON files can be edited by hand before the rename.
@@ -105,9 +105,9 @@ Output file:
 Output:
 
 ```
-Renamed: statement.pdf.json: statement.pdf -> 2026-03-31-DBS-Bank-Statement.pdf
-Already renamed: 2026/IMG_2231.png.json: undated-Tax-Invoice.png
-Failed: a.pdf.json: a file named 2026-03-31-DBS-Bank-Statement.pdf already exists in /abs/path/inbox
+Renamed: statement.pdf.json: statement.pdf -> inbox-2026-03-31-DBS-Bank-Statement.pdf
+Already renamed: 2026/IMG_2231.png.json: 2026-undated-Tax-Invoice.png
+Failed: a.pdf.json: a file named inbox-2026-03-31-DBS-Bank-Statement.pdf already exists in /abs/path/inbox
 Renamed 1, already renamed 1, failed 1
 ```
 
@@ -133,7 +133,7 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
   - Browse folders (click a name to open it, `Up` for the parent, or type a path). Select one or more folders with the checkboxes, then `Add to queue`.
   - Each queued folder runs `doc-categoriser run` in a child process. One folder runs at a time, in queue order.
   - Click a folder in the queue to see its log, live.
-  - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: all documents are extracted and named again, and a document that already has its suggested name is reported as `Already renamed`.
+  - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: all documents are extracted and named again, and a document that already has its new name (`<folder>-<suggested name>`) is reported as `Already renamed`.
   - `Decisions folder`: each queued folder gets the subfolder `<folder name>-<date>-<time>-<job number>` here, with `named/` (the rename decisions). `extracted/` is there during the run, and is deleted when the renaming has finished. Default: `renaming-decision` in the current folder.
   - `Model file`: the GGUF file. Default: `models/Qwen3.5-4B-Q4_K_M.gguf` in the current folder.
 - Options: `--output-dir` and `--model` (the defaults shown in the interface), `--host` (default `127.0.0.1`), `--port` (default `8765`, `0` for a free port), `--no-browser`.
@@ -150,6 +150,7 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
 - Both OCR engines put the recognised text in reading order, one line for each visual row.
 - `suggest_document_name(document, namer)`: gives the document text to a namer, then builds `YYYY-MM-DD-<name><extension>` as a safe file name.
 - `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
+- `name_with_folder(source_path, suggested_name)`: puts the folder name in front of the suggested name.
 - `rename_document(source_path, new_name)`: checks the name, then renames the file in its folder. Never overwrites.
 - `doc-categoriser extract` / `name` / `rename`: run the three stages on a folder.
 - `doc-categoriser run`: runs the three stages on a folder in one process.
