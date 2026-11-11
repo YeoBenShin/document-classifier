@@ -18,6 +18,11 @@
 - The sample text is drawn with a large clear font, so the OCR result is stable and the tests can compare exact text.
 - The first OCR call in a new process takes much longer than later calls, because Vision loads its model.
 
+### Committed scan fixture
+
+- `fixtures/noisy_bank_letter_scan.png` is a noisy, rotated scan of a bank letter. On a clean generated image, Vision does not return Cyrillic look-alike letters. On this scan it does, every time. The test for the look-alike fix needs this file.
+- A newer macOS Vision version could read this file correctly without the fix. Then the test passes but no longer proves the fix.
+
 ### HEIC sample
 
 - The HEIC test file is written with `pillow_heif.from_pillow(...)`, not with the global HEIF opener. If the test registered the opener, the test could pass even when the program does not register it.

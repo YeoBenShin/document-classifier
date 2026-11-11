@@ -127,3 +127,14 @@ def test_ocr_keeps_table_columns_on_the_same_line_in_reading_order(tmp_path: Pat
     document = extract_document(image_path)
 
     assert document.pages[0].text.splitlines() == ["Date Amount", "03 Jan 120.00", "17 Jan 45.90"]
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def test_ocr_gives_latin_letters_for_latin_words_on_a_noisy_scan() -> None:
+    document = extract_document(FIXTURES_DIR / "noisy_bank_letter_scan.png")
+
+    text = document.pages[0].text
+    assert text.splitlines()[0] == "OCBC Bank"
+    assert not [character for character in text if "Ͱ" <= character <= "ӿ"]

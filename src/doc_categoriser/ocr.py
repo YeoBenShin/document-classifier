@@ -27,6 +27,40 @@ class _TextBox:
         return self.top + self.height / 2
 
 
+_LATIN_FOR_LOOKALIKE = str.maketrans(
+    {
+        # Cyrillic
+        "А": "A", "В": "B", "С": "C", "Е": "E", "Н": "H", "І": "I", "Ј": "J", "К": "K",
+        "М": "M", "О": "O", "Р": "P", "Ѕ": "S", "Т": "T", "Х": "X", "У": "Y",
+        "а": "a", "с": "c", "е": "e", "і": "i", "ј": "j", "о": "o", "р": "p", "ѕ": "s", "х": "x", "у": "y",
+        # Greek
+        "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M",
+        "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X", "ο": "o",
+    }
+)
+_LOOKALIKE_CHARACTERS = frozenset(chr(code_point) for code_point in _LATIN_FOR_LOOKALIKE)
+
+
+def _is_greek_or_cyrillic(character: str) -> bool:
+    return "Ͱ" <= character <= "ӿ"
+
+
+def _latinise_lookalike_word(word: str) -> str:
+    """
+    Replace Cyrillic and Greek letters that look like Latin letters with the Latin letters,
+    but only if every Cyrillic or Greek letter in `word` is such a look-alike. Other words are returned unchanged.
+    """
+    non_latin_letters = {character for character in word if _is_greek_or_cyrillic(character)}
+    if non_latin_letters and non_latin_letters <= _LOOKALIKE_CHARACTERS:
+        return word.translate(_LATIN_FOR_LOOKALIKE)
+    return word
+
+
+def _latinise_lookalikes(text: str) -> str:
+    """Apply `_latinise_lookalike_word` to each space-separated word of `text`."""
+    return " ".join(_latinise_lookalike_word(word) for word in text.split(" "))
+
+
 def _group_into_rows(boxes: list[_TextBox]) -> list[list[_TextBox]]:
     """Group boxes whose vertical centres fall inside the same row, top row first."""
     rows: list[list[_TextBox]] = []
@@ -63,7 +97,7 @@ class AppleVisionOcrEngine:
             language_preference=self._language_preference,
         )
         boxes = [
-            _TextBox(text=text, left=x, top=1.0 - (y + height), height=height)
+            _TextBox(text=_latinise_lookalikes(text), left=x, top=1.0 - (y + height), height=height)
             for text, _confidence, (x, y, _width, height) in observations
         ]
         return _boxes_to_text(boxes)

@@ -5,7 +5,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from doc_categoriser.extraction import UnsupportedFileTypeError, default_extractors, extract_document
+from doc_categoriser.errors import ExtractionError, UnsupportedFileTypeError
+from doc_categoriser.extraction import default_extractors, extract_document
 from doc_categoriser.json_output import output_path_for, write_document_json
 
 
@@ -44,6 +45,10 @@ def run_extract(input_dir: Path, output_dir: Path) -> int:
         except UnsupportedFileTypeError:
             print(f"Skipped (unsupported type): {display_name}")
             skipped_count += 1
+            continue
+        except ExtractionError as error:
+            print(f"Failed: {display_name}: {error}", file=sys.stderr)
+            failed_count += 1
             continue
         except Exception as error:
             print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr)

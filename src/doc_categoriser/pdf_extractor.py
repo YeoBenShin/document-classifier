@@ -3,8 +3,12 @@
 from pathlib import Path
 
 import pdfplumber
+from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfplumber.page import Page
+from pdfplumber.pdf import PDF
+from pdfplumber.utils.exceptions import PdfminerException
 
+from doc_categoriser.errors import PasswordProtectedDocumentError
 from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
 from doc_categoriser.ocr import OcrEngine
 
@@ -25,9 +29,18 @@ class PdfExtractor:
 
     def extract(self, path: Path) -> ExtractedDocument:
         """Return the text of every page in the PDF at `path`."""
-        with pdfplumber.open(path) as pdf:
+        with self._open(path) as pdf:
             pages = [self._extract_page(page, page_index + 1) for page_index, page in enumerate(pdf.pages)]
         return ExtractedDocument(source_path=path, pages=pages)
+
+    def _open(self, path: Path) -> PDF:
+        """Open the PDF at `path`. Raise PasswordProtectedDocumentError if it needs a password."""
+        try:
+            return pdfplumber.open(path)
+        except PdfminerException as error:
+            if any(isinstance(argument, PDFPasswordIncorrect) for argument in error.args):
+                raise PasswordProtectedDocumentError(path) from error
+            raise
 
     def _extract_page(self, page: Page, page_number: int) -> PageText:
         """Return the text layer of `page` if it has enough characters, otherwise the OCR text of its rendered image."""

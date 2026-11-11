@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from conftest import PageLines
+from reportlab.lib.pdfencrypt import StandardEncryption
+from reportlab.pdfgen.canvas import Canvas
 
 CLI_EXECUTABLE = Path(sys.executable).parent / "doc-categoriser"
 
@@ -92,3 +94,16 @@ def test_extract_rejects_a_missing_input_folder(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "is not a folder" in result.stderr
     assert not (tmp_path / "extracted").exists()
+
+
+def test_extract_reports_a_password_protected_pdf_clearly(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    canvas = Canvas(str(input_dir / "locked_statement.pdf"), encrypt=StandardEncryption("S1234567A"))
+    canvas.drawString(72, 770, "Confidential bank statement")
+    canvas.save()
+
+    result = run_extract(input_dir, tmp_path / "extracted")
+
+    assert result.returncode == 1
+    assert "Failed: locked_statement.pdf: the PDF is password-protected" in result.stderr

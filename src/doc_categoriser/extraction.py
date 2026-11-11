@@ -4,18 +4,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
+from doc_categoriser.errors import UnsupportedFileTypeError
 from doc_categoriser.image_extractor import ImageExtractor
 from doc_categoriser.models import ExtractedDocument
 from doc_categoriser.ocr import AppleVisionOcrEngine
 from doc_categoriser.pdf_extractor import PdfExtractor
-
-
-class UnsupportedFileTypeError(Exception):
-    """Raised when no extractor supports the suffix of a file."""
-
-    def __init__(self, path: Path) -> None:
-        super().__init__(f"No extractor supports the file type of {path}")
-        self.path = path
 
 
 class DocumentExtractor(Protocol):
