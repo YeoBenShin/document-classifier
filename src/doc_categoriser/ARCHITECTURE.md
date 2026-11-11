@@ -65,5 +65,5 @@ To add a file type, write a class with `supported_suffixes` and `extract(path)`,
 - pywinrt is the official Python projection of the Windows Runtime. It calls Windows.Media.Ocr directly, with no other program to install.
 - The engine uses the languages of the user profile, not a fixed language. Windows has an OCR pack for each installed display language, so this works with no settings. If no pack is installed, the engine fails at start with a message that tells the operator how to install one.
 - `RecognizeAsync` is asynchronous. The engine calls it with `asyncio.run` for each page, so the rest of the program stays synchronous.
-- An image with a side longer than `MaxImageDimension` (10000 pixels on the GitHub Actions Windows runner) makes Windows OCR fail. Thus the engine scales it down first. A 300 dpi page is far below this limit; a very high resolution scan is not.
+- Windows OCR supports images up to `MaxImageDimension` pixels on each side (10000 on the GitHub Actions Windows runner). Thus the engine scales a larger image down first. A 300 dpi page is far below this limit; a very high resolution scan is not.
 - The engine modules have file-level pyright settings for missing imports. Each engine package installs only on its own operating system, so pyright on the other system cannot find it.
