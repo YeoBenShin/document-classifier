@@ -1,22 +1,51 @@
-"""Command-line interface: `doc-categoriser extract <input_dir> <output_dir>`."""
+"""
+Command-line interface:
+`doc-categoriser extract <input_dir> <output_dir>` and
+`doc-categoriser classify <extracted_dir> <output_dir> --model <file.gguf>`.
+"""
 
 import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from doc_categoriser.errors import ExtractionError, UnsupportedFileTypeError
+from doc_categoriser.categories import Category, load_categories
+from doc_categoriser.classification import DocumentClassifier, classify_document
+from doc_categoriser.errors import CategoryFileError, ClassificationError, ExtractionError, UnsupportedFileTypeError
 from doc_categoriser.extraction import default_extractors, extract_document
-from doc_categoriser.json_output import output_path_for, write_document_json
+from doc_categoriser.json_output import (
+    output_path_for,
+    read_document_json,
+    write_classification_json,
+    write_document_json,
+)
+from doc_categoriser.llama_classifier import LlamaCppClassifier
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    """Return the parser for the `extract` subcommand and its arguments."""
+    """Return the parser for the `extract` and `classify` subcommands and their arguments."""
     parser = argparse.ArgumentParser(prog="doc-categoriser")
     subcommands = parser.add_subparsers(dest="command", required=True)
+
     extract_command = subcommands.add_parser("extract", help="Extract the text of every document in a folder to JSON files.")
     extract_command.add_argument("input_dir", type=Path, help="Folder with the source documents. Subfolders are included.")
     extract_command.add_argument("output_dir", type=Path, help="Folder for the JSON files. The subfolder structure is kept.")
+
+    classify_command = subcommands.add_parser(
+        "classify", help="Classify every extracted document JSON file in a folder with a local GGUF model."
+    )
+    classify_command.add_argument("input_dir", type=Path, help="Folder with the JSON files written by `extract`.")
+    classify_command.add_argument("output_dir", type=Path, help="Folder for the classification JSON files.")
+    classify_command.add_argument("--model", type=Path, required=True, help="Path to the GGUF model file.")
+    classify_command.add_argument(
+        "--categories", type=Path, default=Path("categories.toml"), help="TOML file with the categories (default: %(default)s)."
+    )
+    classify_command.add_argument(
+        "--max-document-tokens",
+        type=int,
+        default=1024,
+        help="Only the first this many tokens of each document are read (default: %(default)s). Lower is faster.",
+    )
     return parser
 
 
@@ -61,10 +90,47 @@ def run_extract(input_dir: Path, output_dir: Path) -> int:
     return 1 if failed_count else 0
 
 
+def run_classify(
+    input_dir: Path, output_dir: Path, categories: Sequence[Category], classifier: DocumentClassifier
+) -> int:
+    """
+    Classify every `.json` file under `input_dir` and write one classification JSON file for each under `output_dir`.
+    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
+    """
+    classified_count = failed_count = 0
+    for json_path in (path for path in find_source_files(input_dir) if path.suffix.lower() == ".json"):
+        display_name = json_path.relative_to(input_dir)
+        try:
+            document = read_document_json(json_path)
+            classification = classify_document(document, categories, classifier)
+        except ClassificationError as error:
+            print(f"Failed: {display_name}: {error}", file=sys.stderr)
+            failed_count += 1
+            continue
+        except Exception as error:
+            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr)
+            failed_count += 1
+            continue
+        write_classification_json(document.source_path, classification, output_dir / display_name)
+        print(f"Classified: {display_name} -> {classification.category}")
+        classified_count += 1
+    print(f"Classified {classified_count}, failed {failed_count}")
+    return 1 if failed_count else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse the command line and run the chosen subcommand."""
     parser = build_argument_parser()
     arguments = parser.parse_args(argv)
     if not arguments.input_dir.is_dir():
         parser.error(f"{arguments.input_dir} is not a folder")
-    return run_extract(arguments.input_dir, arguments.output_dir)
+    if arguments.command == "extract":
+        return run_extract(arguments.input_dir, arguments.output_dir)
+    try:
+        categories = load_categories(arguments.categories)
+    except CategoryFileError as error:
+        parser.error(str(error))
+    if not arguments.model.is_file():
+        parser.error(f"{arguments.model} is not a file")
+    classifier = LlamaCppClassifier(arguments.model, max_document_tokens=arguments.max_document_tokens)
+    return run_classify(arguments.input_dir, arguments.output_dir, categories, classifier)

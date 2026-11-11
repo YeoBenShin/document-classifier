@@ -1,5 +1,6 @@
 """Entry point that selects an extractor for a file and runs it."""
 
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -7,7 +8,7 @@ from typing import Protocol
 from doc_categoriser.errors import UnsupportedFileTypeError
 from doc_categoriser.image_extractor import ImageExtractor
 from doc_categoriser.models import ExtractedDocument
-from doc_categoriser.ocr import AppleVisionOcrEngine
+from doc_categoriser.ocr import AppleVisionOcrEngine, OcrEngine, UnavailableOcrEngine
 from doc_categoriser.pdf_extractor import PdfExtractor
 
 
@@ -21,8 +22,11 @@ class DocumentExtractor(Protocol):
 
 
 def default_extractors() -> list[DocumentExtractor]:
-    """Return the extractors for PDF and image files, sharing one Apple Vision OCR engine."""
-    ocr_engine = AppleVisionOcrEngine()
+    """
+    Return the extractors for PDF and image files, sharing one OCR engine.
+    The engine is Apple Vision on macOS. On other systems, pages that need OCR fail with OcrUnavailableError.
+    """
+    ocr_engine: OcrEngine = AppleVisionOcrEngine() if sys.platform == "darwin" else UnavailableOcrEngine()
     return [PdfExtractor(ocr_engine=ocr_engine), ImageExtractor(ocr_engine=ocr_engine)]
 
 

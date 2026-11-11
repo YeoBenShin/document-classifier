@@ -1,5 +1,6 @@
-"""Builders for sample documents used by the tests."""
+"""Builders for sample documents, and the GGUF model, used by the tests."""
 
+import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
+
+from doc_categoriser import LlamaCppClassifier
 
 PageLines = Sequence[str]
 
@@ -82,3 +85,25 @@ def make_mixed_pdf(tmp_path: Path) -> Callable[[str, list[tuple[str, PageLines]]
         return pdf_path
 
     return build
+
+
+TEST_MODEL_PATH = Path(
+    os.environ.get(
+        "DOC_CATEGORISER_TEST_MODEL",
+        Path(__file__).resolve().parent.parent / "models" / "Qwen3.5-4B-Q4_K_M.gguf",
+    )
+)
+
+
+@pytest.fixture(scope="session")
+def test_model_path() -> Path:
+    """Return the GGUF model used by the classification tests. Skip the test if the file is not there."""
+    if not TEST_MODEL_PATH.is_file():
+        pytest.skip(f"GGUF model not found at {TEST_MODEL_PATH}. Set DOC_CATEGORISER_TEST_MODEL to its path.")
+    return TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def llama_classifier(test_model_path: Path) -> LlamaCppClassifier:
+    """Return one classifier for the whole test session, because loading the model takes several seconds."""
+    return LlamaCppClassifier(test_model_path)

@@ -1,0 +1,31 @@
+# Categories for `doc-categoriser classify`.
+# Each [[category]] needs a `name` (used in the output JSON) and a `description` (shown to the model).
+# The model must choose exactly one of these names for each document.
+
+[[category]]
+name = "bank_statement"
+description = "A periodic statement of a bank, savings or current account, with a list of transactions and balances."
+
+[[category]]
+name = "loan_agreement"
+description = "A loan, mortgage or credit facility agreement, offer letter, or repayment schedule."
+
+[[category]]
+name = "portfolio_valuation"
+description = "A statement of investment holdings and their values, from a broker, fund, custodian or wealth manager."
+
+[[category]]
+name = "invoice_receipt"
+description = "An invoice, bill, receipt, or payment confirmation for goods or services."
+
+[[category]]
+name = "tax_document"
+description = "A tax return, tax assessment, tax certificate, or other letter from a tax authority."
+
+[[category]]
+name = "insurance"
+description = "An insurance policy, policy schedule, premium notice, or insurance claim."
+
+[[category]]
+name = "other"
+description = "Any document that does not match one of the other categories."

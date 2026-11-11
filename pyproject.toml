@@ -1,14 +1,15 @@
 [project]
 name = "doc-categoriser"
 version = "0.1.0"
-description = "Extract the text content of documents (PDFs and images) for later categorisation."
+description = "Extract the text content of documents (PDFs and images) and classify them with a local LLM."
 readme = "README.md"
 authors = [
     { name = "YeoBenShin", email = "orang3cats@gmail.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "ocrmac>=1.0.1",
+    "llama-cpp-python>=0.3.36",
+    "ocrmac>=1.0.1; sys_platform == 'darwin'",
     "pdfplumber>=0.11.10",
     "pillow-heif>=1.8.1",
 ]
@@ -16,6 +17,17 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+llama-cpp-python = [{ index = "llama-cpp-python-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "llama-cpp-python-cpu"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+explicit = true
+
+[tool.uv.extra-build-variables]
+llama-cpp-python = { CC = "/usr/bin/clang", CXX = "/usr/bin/clang++" }
 
 [dependency-groups]
 dev = [

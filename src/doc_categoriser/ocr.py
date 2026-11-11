@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from ocrmac import ocrmac
 from PIL import Image
+
+from doc_categoriser.errors import OcrUnavailableError
 
 
 class OcrEngine(Protocol):
@@ -91,6 +92,8 @@ class AppleVisionOcrEngine:
 
     def recognise_text(self, image: Image.Image) -> str:
         """Return the text in `image`, one line per visual row."""
+        from ocrmac import ocrmac
+
         observations = ocrmac.text_from_image(
             image,
             recognition_level="accurate",
@@ -101,3 +104,11 @@ class AppleVisionOcrEngine:
             for text, _confidence, (x, y, _width, height) in observations
         ]
         return _boxes_to_text(boxes)
+
+
+class UnavailableOcrEngine:
+    """OCR engine for systems that have no OCR engine. Each call raises OcrUnavailableError."""
+
+    def recognise_text(self, image: Image.Image) -> str:
+        """Raise OcrUnavailableError."""
+        raise OcrUnavailableError()

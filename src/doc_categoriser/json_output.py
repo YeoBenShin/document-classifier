@@ -1,10 +1,12 @@
-"""Writes extracted documents as JSON files for the comprehension stage."""
+"""Reads and writes the JSON files that pass documents between the extraction and classification stages."""
 
 import json
 from pathlib import Path
 from typing import Any
 
-from doc_categoriser.models import ExtractedDocument
+from doc_categoriser.classification import Classification
+from doc_categoriser.errors import ClassificationError
+from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
 
 
 def document_to_json_dict(document: ExtractedDocument) -> dict[str, Any]:
@@ -29,3 +31,25 @@ def write_document_json(document: ExtractedDocument, destination: Path) -> None:
     """Write `document` as UTF-8 JSON to `destination`, creating parent folders if necessary."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(document_to_json_dict(document), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_document_json(path: Path) -> ExtractedDocument:
+    """Return the ExtractedDocument in a JSON file written by `write_document_json`. Raise ClassificationError if it is not one."""
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+        return ExtractedDocument(
+            source_path=Path(content["source_path"]),
+            pages=[
+                PageText(page_number=page["page_number"], text=page["text"], method=ExtractionMethod(page["method"]))
+                for page in content["pages"]
+            ],
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ClassificationError("the file is not an extracted document JSON file") from error
+
+
+def write_classification_json(source_path: Path, classification: Classification, destination: Path) -> None:
+    """Write the source path, category and reason as UTF-8 JSON to `destination`, creating parent folders if necessary."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    content = {"source_path": str(source_path), "category": classification.category, "reason": classification.reason}
+    destination.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
