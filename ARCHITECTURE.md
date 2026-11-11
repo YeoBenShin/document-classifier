@@ -22,7 +22,14 @@ The JSON files are the contract between extraction and the later comprehension s
 ### Local processing
 
 - All processing is local. The documents are financial (bank statements, loan agreements, portfolio values) and must not go to a third-party service.
-- OCR uses Apple Vision (through ocrmac). It is local, fast, accurate, and needs no model download. The cost is that the program runs only on macOS.
+- OCR uses the engine built into the operating system: Apple Vision on macOS (through ocrmac), Windows.Media.Ocr on Windows (through pywinrt). Both are local, fast, and need no model download.
+
+### Native OCR for each operating system
+
+- The program must run on macOS and on Windows. A cross-platform engine (for example Tesseract) needs a separate install and a model download, and is less accurate on photos and noisy scans than the built-in engines.
+- The engine is chosen with `--ocr-engine`. The default is the engine of the operating system, so an operator does not need the option.
+- An engine is only importable on its own operating system (ocrmac needs pyobjc, pywinrt needs Windows). Thus the dependencies have platform markers, and the engine modules are imported only when the engine is created.
+- The Windows tests run on a GitHub Actions Windows runner. The development machine is a Mac, and no Windows machine is available to it.
 
 ### Output format
 

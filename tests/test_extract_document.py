@@ -140,3 +140,17 @@ def test_ocr_gives_latin_letters_for_latin_words_on_a_noisy_scan() -> None:
     text = document.pages[0].text
     assert text.splitlines()[0] == "OCBC Bank"
     assert not [character for character in text if "Ͱ" <= character <= "ӿ"]
+
+
+def test_scan_larger_than_10000_pixels_is_read_with_ocr(tmp_path: Path) -> None:
+    image = Image.new("RGB", (7800, 11000), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=200)
+    draw.text((600, 900), "Custody statement", fill="black", font=font)
+    draw.text((600, 1400), "Total holdings 8,120,000", fill="black", font=font)
+    image_path = tmp_path / "high_resolution_scan.png"
+    image.save(image_path)
+
+    document = extract_document(image_path)
+
+    assert document.pages[0].text.splitlines() == ["Custody statement", "Total holdings 8,120,000"]

@@ -18,3 +18,5 @@ jobs:
       - run: uv sync
       - run: uv run pyright
       - run: uv run pytest -v
+      - if: runner.os == 'Windows'
+        run: uv run python -c "from winrt.windows.media.ocr import OcrEngine; print('MAXDIM', OcrEngine.max_image_dimension)"
