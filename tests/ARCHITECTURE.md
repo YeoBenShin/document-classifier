@@ -5,7 +5,7 @@
 - `conftest.py`: builders that make sample documents in a temporary folder: PDFs with a text layer (reportlab), image-only PDFs, PDFs with both page types, and image files (Pillow). The `test_model_path` and `llama_namer` fixtures give the GGUF model (one load for the whole session).
 - `test_extract_document.py`: tests the extraction library seam, `extract_document(path)`.
 - `test_name_document.py`: tests the naming library seam, `suggest_document_name(document, namer)`.
-- `test_cli.py`: tests the CLI seam, including `--ocr-engine`. It runs the installed `doc-categoriser` command in a subprocess and examines the JSON files, stdout, stderr and exit code. The name tests run `extract` first, as an operator does.
+- `test_cli.py`: tests the CLI seam, including `--ocr-engine`. It runs the installed `doc-categoriser` command in a subprocess and examines the JSON files, stdout, stderr and exit code. The name tests run `extract` first, as an operator does. One rename test runs `extract`, `name` and `rename`. The other rename tests write the name suggestion JSON directly, so they need no model and can use exact unsafe names (`../`, changed extension, names that already exist).
 
 ## Decisions
 

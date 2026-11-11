@@ -1,7 +1,8 @@
 """
 Command-line interface:
 `doc-categoriser extract [--ocr-engine NAME] <input_dir> <output_dir>` and
-`doc-categoriser name <extracted_dir> <output_dir> --model <file.gguf>`.
+`doc-categoriser name <extracted_dir> <output_dir> --model <file.gguf>` and
+`doc-categoriser rename [--dry-run] <named_dir>`.
 """
 
 import argparse
@@ -11,15 +12,23 @@ from dataclasses import replace
 from pathlib import Path
 
 from doc_categoriser.classification import DocumentNamer, LlamaCppNamer, suggest_document_name, unique_name
-from doc_categoriser.errors import ExtractionError, NamingError, OcrEngineUnavailableError, UnsupportedFileTypeError
+from doc_categoriser.errors import (
+    ExtractionError,
+    NamingError,
+    OcrEngineUnavailableError,
+    RenamingError,
+    UnsupportedFileTypeError,
+)
 from doc_categoriser.extraction import DocumentExtractor, default_extractors, extract_document
 from doc_categoriser.json_output import (
     output_path_for,
     read_document_json,
+    read_name_suggestion_json,
     write_document_json,
     write_name_suggestion_json,
 )
 from doc_categoriser.extraction.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
+from doc_categoriser.renaming import RenameOutcome, rename_document
 
 
 def positive_integer(text: str) -> int:
@@ -34,7 +43,7 @@ def positive_integer(text: str) -> int:
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    """Return the parser for the `extract` and `name` subcommands and their arguments."""
+    """Return the parser for the `extract`, `name` and `rename` subcommands and their arguments."""
     parser = argparse.ArgumentParser(prog="doc-categoriser")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -60,6 +69,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=positive_integer,
         default=1024,
         help="Only the first this many tokens of each document are read (default: %(default)s). Lower is faster.",
+    )
+
+    rename_command = subcommands.add_parser(
+        "rename", help="Rename every source document to the name suggested by `name`, in the folder where it is."
+    )
+    rename_command.add_argument("input_dir", type=Path, help="Folder with the JSON files written by `name`.")
+    rename_command.add_argument(
+        "--dry-run", action="store_true", help="Show what would be renamed, and change no file."
     )
     return parser
 
@@ -134,6 +151,42 @@ def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer) -> int:
     return 1 if failed_count else 0
 
 
+def run_rename(input_dir: Path, dry_run: bool) -> int:
+    """
+    Rename the source document of every `.json` file under `input_dir` to its suggested name, in the folder where it is.
+    With `dry_run`, change no file. No file is overwritten, and no two documents get the same new name in one folder.
+    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
+    """
+    renamed_label = "Would rename" if dry_run else "Renamed"
+    renamed_count = already_renamed_count = failed_count = 0
+    new_names_in_use: set[tuple[Path, str]] = set()
+    for json_path in (path for path in find_source_files(input_dir) if path.suffix.lower() == ".json"):
+        display_name = json_path.relative_to(input_dir)
+        try:
+            source_path, new_name = read_name_suggestion_json(json_path)
+            new_name_key = (source_path.parent, new_name.lower())
+            if new_name_key in new_names_in_use:
+                raise RenamingError(f"another document already gets the name {new_name} in {source_path.parent}")
+            outcome = rename_document(source_path, new_name, dry_run=dry_run)
+        except RenamingError as error:
+            print(f"Failed: {display_name}: {error}", file=sys.stderr, flush=True)
+            failed_count += 1
+            continue
+        except Exception as error:
+            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+            failed_count += 1
+            continue
+        new_names_in_use.add(new_name_key)
+        if outcome is RenameOutcome.ALREADY_RENAMED:
+            print(f"Already renamed: {display_name}: {new_name}", flush=True)
+            already_renamed_count += 1
+        else:
+            print(f"{renamed_label}: {display_name}: {source_path.name} -> {new_name}", flush=True)
+            renamed_count += 1
+    print(f"{renamed_label} {renamed_count}, already renamed {already_renamed_count}, failed {failed_count}")
+    return 1 if failed_count else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse the command line and run the chosen subcommand."""
     parser = build_argument_parser()
@@ -148,6 +201,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         except OcrEngineUnavailableError as error:
             parser.error(str(error))
         return run_extract(arguments.input_dir, arguments.output_dir, default_extractors(ocr_engine))
+    if arguments.command == "rename":
+        return run_rename(arguments.input_dir, arguments.dry_run)
     if not arguments.model.is_file():
         parser.error(f"{arguments.model} is not a file")
     try:

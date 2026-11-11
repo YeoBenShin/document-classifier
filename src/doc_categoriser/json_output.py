@@ -1,10 +1,10 @@
-"""Reads and writes the JSON files that pass documents between the extraction and naming stages."""
+"""Reads and writes the JSON files that pass documents between the extraction, naming and renaming stages."""
 
 import json
 from pathlib import Path
 from typing import Any
 
-from doc_categoriser.errors import NamingError
+from doc_categoriser.errors import NamingError, RenamingError
 from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
 from doc_categoriser.classification.naming import NameSuggestion
 
@@ -61,3 +61,18 @@ def write_name_suggestion_json(source_path: Path, suggestion: NameSuggestion, de
         "reason": suggestion.reason,
     }
     destination.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_name_suggestion_json(path: Path) -> tuple[Path, str]:
+    """
+    Return the source path and the suggested name in a JSON file written by `write_name_suggestion_json`.
+    Raise RenamingError if it is not one.
+    """
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+        source_path, suggested_name = content["source_path"], content["suggested_name"]
+    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError) as error:
+        raise RenamingError("the file is not a name suggestion JSON file") from error
+    if not isinstance(source_path, str) or not isinstance(suggested_name, str):
+        raise RenamingError("the file is not a name suggestion JSON file")
+    return Path(source_path), suggested_name

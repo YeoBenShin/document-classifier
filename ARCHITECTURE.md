@@ -2,18 +2,18 @@
 
 ## How it works
 
-The program is a pipeline of stages: **extraction**, then **naming**. A later stage will rename the documents with the suggested names.
+The program is a pipeline of stages: **extraction**, then **naming**, then **renaming**.
 
 ```
-input folder ──> doc-categoriser extract ──> folder of extracted JSON ──> doc-categoriser name ──> folder of name suggestion JSON ──> (later) rename
-                  (pdfplumber, OCR)                                         (local GGUF model)
+input folder ──> doc-categoriser extract ──> folder of extracted JSON ──> doc-categoriser name ──> folder of name suggestion JSON ──> doc-categoriser rename ──> input folder, files renamed
+                  (pdfplumber, OCR)                                         (local GGUF model)                                         (in place, no overwrite)
 ```
 
-- `src/doc_categoriser/`: the library and the CLI. `extraction/` and `classification/` hold one stage each. See its `ARCHITECTURE.md`.
+- `src/doc_categoriser/`: the library and the CLI. `extraction/`, `classification/` and `renaming/` hold one stage each. See its `ARCHITECTURE.md`.
 - `tests/`: tests at the public seams (library and CLI). See its `ARCHITECTURE.md`.
 - `models/` (not committed): the GGUF model files.
 
-The extracted JSON files are the contract between extraction and naming. Each file holds the source path, the file type, and the text of each page with the method used. The name suggestion JSON files hold the source path, the suggested name and the reason.
+The extracted JSON files are the contract between extraction and naming. Each file holds the source path, the file type, and the text of each page with the method used. The name suggestion JSON files hold the source path, the suggested name and the reason. They are the contract between naming and renaming.
 
 ## Decisions
 
@@ -54,7 +54,12 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 ### Names from content, no categories
 
 - The documents are not sorted into fixed categories. Each name is `YYYY-MM-DD-<name>`: the document date, then a descriptive part from the content only. The instructions say what a useful descriptive part holds (who issued it, what it is), but do not set a format. Thus the word order in that part can differ between documents. The program changes spaces and `_` to `-`, so all names use one separator.
-- The command writes suggestions only and renames no file. The operator can examine the names before a later step applies them.
+- `name` writes suggestions only and renames no file. The operator can examine (and edit) the names before `rename` applies them.
+
+### Separate rename stage
+
+- The rename changes the operator's files, and a wrong name from the model is likely sometimes. Thus it is a separate command that the operator runs after examining the suggestions, with `--dry-run` to see the result first.
+- `rename` reads only the name suggestion JSON, not the model. It is fast and needs no model file.
 
 ### Constrained output
 

@@ -1,4 +1,4 @@
-"""Errors raised by the extraction and naming stages. Their messages are written for the operator."""
+"""Errors raised by the extraction, naming and renaming stages. Their messages are written for the operator."""
 
 from pathlib import Path
 
@@ -29,3 +29,7 @@ class OcrEngineUnavailableError(ExtractionError):
 
 class NamingError(Exception):
     """A name could not be suggested for a document for a known reason."""
+
+
+class RenamingError(Exception):
+    """A document could not be renamed for a known reason."""

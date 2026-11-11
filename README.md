@@ -1,6 +1,6 @@
 # doc-categoriser
 
-Extracts the text of documents (PDFs and images) to JSON files, then suggests a descriptive file name for each document from its content with a local LLM. No document leaves the machine. No file is renamed: the suggestions are written to JSON files.
+Extracts the text of documents (PDFs and images) to JSON files, suggests a descriptive file name for each document from its content with a local LLM, then renames the documents. No document leaves the machine. The suggestions are written to JSON files first, so the operator can examine them before the rename.
 
 ## Requirements
 
@@ -39,6 +39,8 @@ Then use `.venv\Scripts\doc-categoriser` in place of `uv run doc-categoriser` be
 uv run doc-categoriser extract <input_dir> <extracted_dir>
 uv run doc-categoriser extract --ocr-engine windows <input_dir> <extracted_dir>
 uv run doc-categoriser name <extracted_dir> <named_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
+uv run doc-categoriser rename --dry-run <named_dir>
+uv run doc-categoriser rename <named_dir>
 ```
 
 ### extract
@@ -89,6 +91,24 @@ Output file:
 }
 ```
 
+### rename
+
+- Reads every `.json` file under `<named_dir>`. For each, renames the file at `source_path` to `suggested_name`, in the same folder.
+- `--dry-run`: shows what would be renamed, and changes no file.
+- A file is never overwritten. If a different file already has the name, or two documents of one folder get the same name, the document is reported as failed and is not renamed.
+- The suggested name must be one file name (no `/`, `\`, `..`) with the same extension as the source. Otherwise the document fails. The JSON files can be edited by hand before the rename.
+- Safe to run again: a document that already has its new name is reported as `Already renamed`.
+- Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder).
+
+Output:
+
+```
+Renamed: statement.pdf.json: statement.pdf -> 2026-03-31-DBS-Bank-Statement.pdf
+Already renamed: 2026/IMG_2231.png.json: undated-Tax-Invoice.png
+Failed: a.pdf.json: a file named 2026-03-31-DBS-Bank-Statement.pdf already exists in /abs/path/inbox
+Renamed 1, already renamed 1, failed 1
+```
+
 ## Moving parts
 
 - `extract_document(path)`: selects an extractor by file suffix and returns the text, page by page.
@@ -99,7 +119,8 @@ Output file:
 - Both OCR engines put the recognised text in reading order, one line for each visual row.
 - `suggest_document_name(document, namer)`: gives the document text to a namer, then builds `YYYY-MM-DD-<name><extension>` as a safe file name.
 - `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
-- `doc-categoriser extract` / `name`: run the two stages on a folder.
+- `rename_document(source_path, new_name)`: checks the name, then renames the file in its folder. Never overwrites.
+- `doc-categoriser extract` / `name` / `rename`: run the three stages on a folder.
 
 ## Tests
 
