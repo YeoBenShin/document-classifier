@@ -1,4 +1,4 @@
-"""Errors raised by the extraction stage. Their messages are written for the operator."""
+"""Errors raised by the extraction and naming stages. Their messages are written for the operator."""
 
 from pathlib import Path
 
@@ -25,3 +25,7 @@ class PasswordProtectedDocumentError(ExtractionError):
 
 class OcrEngineUnavailableError(ExtractionError):
     """Raised when the chosen OCR engine cannot run on this operating system or its parts are not installed."""
+
+
+class NamingError(Exception):
+    """A name could not be suggested for a document for a known reason."""
