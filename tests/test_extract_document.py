@@ -1,5 +1,6 @@
 """Behaviour of extract_document, the library seam of the extraction stage."""
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -132,9 +133,24 @@ def test_ocr_keeps_table_columns_on_the_same_line_in_reading_order(tmp_path: Pat
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="the look-alike letter fix is for Apple Vision OCR")
 def test_ocr_gives_latin_letters_for_latin_words_on_a_noisy_scan() -> None:
     document = extract_document(FIXTURES_DIR / "noisy_bank_letter_scan.png")
 
     text = document.pages[0].text
     assert text.splitlines()[0] == "OCBC Bank"
     assert not [character for character in text if "Ͱ" <= character <= "ӿ"]
+
+
+def test_scan_larger_than_10000_pixels_is_read_with_ocr(tmp_path: Path) -> None:
+    image = Image.new("RGB", (7800, 11000), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=200)
+    draw.text((600, 900), "Custody statement", fill="black", font=font)
+    draw.text((600, 1400), "Account 4471 closed", fill="black", font=font)
+    image_path = tmp_path / "high_resolution_scan.png"
+    image.save(image_path)
+
+    document = extract_document(image_path)
+
+    assert document.pages[0].text.splitlines() == ["Custody statement", "Account 4471 closed"]
