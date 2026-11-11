@@ -147,11 +147,15 @@ def test_name_writes_a_suggested_name_for_each_extracted_document_mirroring_fold
     assert result.returncode == 0, result.stderr
     statement = json.loads((named_dir / "scan_0001.pdf.json").read_text())
     assert statement["source_path"] == str((input_dir / "scan_0001.pdf").resolve())
+    assert statement["suggested_name"].startswith("2026-03-31-")
+    assert statement["document_date"] == "2026-03-31"
     assert statement["suggested_name"].endswith(".pdf")
     assert "statement" in statement["suggested_name"].lower()
     assert not CHARACTERS_NOT_ALLOWED_IN_FILE_NAMES & set(statement["suggested_name"])
     assert statement["reason"].strip()
     invoice = json.loads((named_dir / "2026" / "IMG_2231.png.json").read_text())
+    assert invoice["suggested_name"].startswith("undated-")
+    assert invoice["document_date"] is None
     assert invoice["suggested_name"].endswith(".png")
     assert "invoice" in invoice["suggested_name"].lower()
     assert f"Named: scan_0001.pdf.json -> {statement['suggested_name']}" in result.stdout

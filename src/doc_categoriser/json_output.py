@@ -49,7 +49,15 @@ def read_document_json(path: Path) -> ExtractedDocument:
 
 
 def write_name_suggestion_json(source_path: Path, suggestion: NameSuggestion, destination: Path) -> None:
-    """Write the source path, suggested name and reason as UTF-8 JSON to `destination`, creating parent folders if necessary."""
+    """
+    Write the source path, suggested name, document date (YYYY-MM-DD or null) and reason as UTF-8 JSON to `destination`,
+    creating parent folders if necessary.
+    """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    content = {"source_path": str(source_path), "suggested_name": suggestion.name, "reason": suggestion.reason}
+    content = {
+        "source_path": str(source_path),
+        "suggested_name": suggestion.name,
+        "document_date": suggestion.document_date.isoformat() if suggestion.document_date else None,
+        "reason": suggestion.reason,
+    }
     destination.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")

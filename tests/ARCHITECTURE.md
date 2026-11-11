@@ -36,5 +36,6 @@
 
 ### One stub namer for safe-name rules
 
-- `FixedAnswerNamer` in `test_name_document.py` returns a fixed name. It is used only for the safe-name tests. These tests need exact unsafe names (Windows device names, 300 characters, every character not allowed), and the real model does not give them on request.
+- `FixedAnswerNamer` in `test_name_document.py` returns a fixed name and date. It is used only for the safe-name and date-prefix rules. These tests need exact unsafe names (300 characters, every character not allowed, the date inside the name, no date), and the real model does not give them on request.
+- The date check against the document text is tested with the real model only (an invoice number with a year and no date, a month-and-year date, a period).
 - The Windows paths (no ocrmac, prebuilt wheel) are not covered by the tests, because the tests run on macOS.
