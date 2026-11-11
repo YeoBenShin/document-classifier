@@ -2,25 +2,24 @@
 
 ## How it works
 
-The program is a pipeline of stages: **extraction**, then **classification**. A later stage will rename the documents.
+The program is a pipeline of stages: **extraction**, then **naming**. A later stage will rename the documents with the suggested names.
 
 ```
-input folder ──> doc-categoriser extract ──> folder of extracted JSON ──> doc-categoriser classify ──> folder of classification JSON ──> (later) rename
-                  (pdfplumber, OCR)                                         (local GGUF model, categories.toml)
+input folder ──> doc-categoriser extract ──> folder of extracted JSON ──> doc-categoriser name ──> folder of name suggestion JSON ──> (later) rename
+                  (pdfplumber, OCR)                                         (local GGUF model)
 ```
 
-- `src/doc_categoriser/`: the extraction and classification library and the CLI. See its `ARCHITECTURE.md`.
+- `src/doc_categoriser/`: the extraction and naming library and the CLI. See its `ARCHITECTURE.md`.
 - `tests/`: tests at the public seams (library and CLI). See its `ARCHITECTURE.md`.
-- `categories.toml`: the categories the classifier chooses from. The operator edits it.
 - `models/` (not committed): the GGUF model files.
 
-The extracted JSON files are the contract between extraction and classification. Each file holds the source path, the file type, and the text of each page with the method used. The classification JSON files hold the source path, the category and the reason.
+The extracted JSON files are the contract between extraction and naming. Each file holds the source path, the file type, and the text of each page with the method used. The name suggestion JSON files hold the source path, the suggested name and the reason.
 
 ## Decisions
 
 ### Pipeline split
 
-- Extraction and comprehension are separate stages with files between them. Extraction (OCR especially) is slow, and comprehension will change often (prompts, models, categories). With files between them, comprehension can run again without OCR again.
+- Extraction and comprehension are separate stages with files between them. Extraction (OCR especially) is slow, and comprehension will change often (prompts, models). With files between them, comprehension can run again without OCR again.
 
 ### Local processing
 
@@ -45,15 +44,20 @@ The extracted JSON files are the contract between extraction and classification.
 - Measured on an M3 Pro: about 10 s for a 720-token document on CPU only, 4 s with Metal. The i7-1355U laptop will be slower. Not measured yet.
 - The model is a parameter (`--model`). A smaller model (Qwen3.5 0.8B or 2B) or a larger one can be used without code changes.
 
+### Names from content, no categories
+
+- The documents have no naming convention and are not sorted into fixed categories. The model names each document from its content only. The instructions say what a useful name holds (who issued it, what it is, the date or period), but do not set a format. Thus the separators and word order can differ between documents.
+- The command writes suggestions only and renames no file. The operator can examine the names before a later step applies them.
+
 ### Constrained output
 
-- The model answer is constrained by a JSON schema (llama.cpp grammar): `reason` (text) then `category` (one of the category names). The model cannot return a name that is not in the categories file, and the output is always JSON.
-- `reason` comes before `category`, so the model writes a short explanation before it chooses. The operator also uses the reason to examine a doubtful result.
+- The model answer is constrained by a JSON schema (llama.cpp grammar): `reason` (text) then `name` (text). The output is always JSON.
+- `reason` comes before `name`, so the model writes a short explanation before it names the document. The operator also uses the reason to examine a doubtful name.
 
 ### Only the start of each document
 
-- The classifier reads only the first `max_document_tokens` tokens (default 1024). The title and first page usually identify the document type. Prompt processing on a laptop CPU is the slowest part, so a long statement must not be read completely.
-- The limit is in tokens, not characters, because the classifier knows the tokenizer. Text with many digits (statements) uses about one token per digit, so a character limit would not reliably fit in the context.
+- The namer reads only the first `max_document_tokens` tokens (default 1024). The title and first page usually identify the document type. Prompt processing on a laptop CPU is the slowest part, so a long statement must not be read completely.
+- The limit is in tokens, not characters, because the namer knows the tokenizer. Text with many digits (statements) uses about one token per digit, so a character limit would not reliably fit in the context.
 
 ### Scope
 

@@ -1,7 +1,7 @@
 [project]
 name = "doc-categoriser"
 version = "0.1.0"
-description = "Extract the text content of documents (PDFs and images) and classify them with a local LLM."
+description = "Extract the text content of documents (PDFs and images) and suggest a file name for each from its content with a local LLM."
 readme = "README.md"
 authors = [
     { name = "YeoBenShin", email = "orang3cats@gmail.com" }

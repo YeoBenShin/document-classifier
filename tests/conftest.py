@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
 
-from doc_categoriser import LlamaCppClassifier
+from doc_categoriser import LlamaCppNamer
 
 PageLines = Sequence[str]
 
@@ -97,13 +97,13 @@ TEST_MODEL_PATH = Path(
 
 @pytest.fixture(scope="session")
 def test_model_path() -> Path:
-    """Return the GGUF model used by the classification tests. Skip the test if the file is not there."""
+    """Return the GGUF model used by the naming tests. Skip the test if the file is not there."""
     if not TEST_MODEL_PATH.is_file():
         pytest.skip(f"GGUF model not found at {TEST_MODEL_PATH}. Set DOC_CATEGORISER_TEST_MODEL to its path.")
     return TEST_MODEL_PATH
 
 
 @pytest.fixture(scope="session")
-def llama_classifier(test_model_path: Path) -> LlamaCppClassifier:
-    """Return one classifier for the whole test session, because loading the model takes several seconds."""
-    return LlamaCppClassifier(test_model_path)
+def llama_namer(test_model_path: Path) -> LlamaCppNamer:
+    """Return one namer for the whole test session, because loading the model takes several seconds."""
+    return LlamaCppNamer(test_model_path)

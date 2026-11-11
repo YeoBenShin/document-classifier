@@ -1,25 +1,25 @@
 """
 Command-line interface:
 `doc-categoriser extract <input_dir> <output_dir>` and
-`doc-categoriser classify <extracted_dir> <output_dir> --model <file.gguf>`.
+`doc-categoriser name <extracted_dir> <output_dir> --model <file.gguf>`.
 """
 
 import argparse
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
-from doc_categoriser.categories import Category, load_categories
-from doc_categoriser.classification import DocumentClassifier, classify_document
-from doc_categoriser.errors import CategoryFileError, ClassificationError, ExtractionError, UnsupportedFileTypeError
+from doc_categoriser.errors import ExtractionError, NamingError, UnsupportedFileTypeError
 from doc_categoriser.extraction import default_extractors, extract_document
 from doc_categoriser.json_output import (
     output_path_for,
     read_document_json,
-    write_classification_json,
     write_document_json,
+    write_name_suggestion_json,
 )
-from doc_categoriser.llama_classifier import LlamaCppClassifier
+from doc_categoriser.llama_namer import LlamaCppNamer
+from doc_categoriser.naming import DocumentNamer, suggest_document_name, unique_name
 
 
 def positive_integer(text: str) -> int:
@@ -34,7 +34,7 @@ def positive_integer(text: str) -> int:
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    """Return the parser for the `extract` and `classify` subcommands and their arguments."""
+    """Return the parser for the `extract` and `name` subcommands and their arguments."""
     parser = argparse.ArgumentParser(prog="doc-categoriser")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -42,16 +42,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
     extract_command.add_argument("input_dir", type=Path, help="Folder with the source documents. Subfolders are included.")
     extract_command.add_argument("output_dir", type=Path, help="Folder for the JSON files. The subfolder structure is kept.")
 
-    classify_command = subcommands.add_parser(
-        "classify", help="Classify every extracted document JSON file in a folder with a local GGUF model."
+    name_command = subcommands.add_parser(
+        "name", help="Suggest a file name from the content of every extracted document, with a local GGUF model."
     )
-    classify_command.add_argument("input_dir", type=Path, help="Folder with the JSON files written by `extract`.")
-    classify_command.add_argument("output_dir", type=Path, help="Folder for the classification JSON files.")
-    classify_command.add_argument("--model", type=Path, required=True, help="Path to the GGUF model file.")
-    classify_command.add_argument(
-        "--categories", type=Path, default=Path("categories.toml"), help="TOML file with the categories (default: %(default)s)."
-    )
-    classify_command.add_argument(
+    name_command.add_argument("input_dir", type=Path, help="Folder with the JSON files written by `extract`.")
+    name_command.add_argument("output_dir", type=Path, help="Folder for the name suggestion JSON files.")
+    name_command.add_argument("--model", type=Path, required=True, help="Path to the GGUF model file.")
+    name_command.add_argument(
         "--max-document-tokens",
         type=positive_integer,
         default=1024,
@@ -101,20 +98,20 @@ def run_extract(input_dir: Path, output_dir: Path) -> int:
     return 1 if failed_count else 0
 
 
-def run_classify(
-    input_dir: Path, output_dir: Path, categories: Sequence[Category], classifier: DocumentClassifier
-) -> int:
+def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer) -> int:
     """
-    Classify every `.json` file under `input_dir` and write one classification JSON file for each under `output_dir`.
-    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
+    Suggest a name for every `.json` file under `input_dir` and write one name suggestion JSON file for each under `output_dir`.
+    Documents from the same folder never get the same name. A file that fails is reported and the run continues.
+    Return 1 if any file failed, otherwise 0.
     """
-    classified_count = failed_count = 0
+    named_count = failed_count = 0
+    names_in_use_by_folder: dict[Path, set[str]] = {}
     for json_path in (path for path in find_source_files(input_dir) if path.suffix.lower() == ".json"):
         display_name = json_path.relative_to(input_dir)
         try:
             document = read_document_json(json_path)
-            classification = classify_document(document, categories, classifier)
-        except ClassificationError as error:
+            suggestion = suggest_document_name(document, namer)
+        except NamingError as error:
             print(f"Failed: {display_name}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
@@ -122,10 +119,12 @@ def run_classify(
             print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
-        write_classification_json(document.source_path, classification, output_dir / display_name)
-        print(f"Classified: {display_name} -> {classification.category}", flush=True)
-        classified_count += 1
-    print(f"Classified {classified_count}, failed {failed_count}")
+        names_in_use = names_in_use_by_folder.setdefault(display_name.parent, set())
+        suggestion = replace(suggestion, name=unique_name(suggestion.name, names_in_use))
+        write_name_suggestion_json(document.source_path, suggestion, output_dir / display_name)
+        print(f"Named: {display_name} -> {suggestion.name}", flush=True)
+        named_count += 1
+    print(f"Named {named_count}, failed {failed_count}")
     return 1 if failed_count else 0
 
 
@@ -137,14 +136,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"{arguments.input_dir} is not a folder")
     if arguments.command == "extract":
         return run_extract(arguments.input_dir, arguments.output_dir)
-    try:
-        categories = load_categories(arguments.categories)
-    except CategoryFileError as error:
-        parser.error(str(error))
     if not arguments.model.is_file():
         parser.error(f"{arguments.model} is not a file")
     try:
-        classifier = LlamaCppClassifier(arguments.model, max_document_tokens=arguments.max_document_tokens)
+        namer = LlamaCppNamer(arguments.model, max_document_tokens=arguments.max_document_tokens)
     except ValueError as error:
         parser.error(f"{arguments.model}: cannot load the model ({error})")
-    return run_classify(arguments.input_dir, arguments.output_dir, categories, classifier)
+    return run_name(arguments.input_dir, arguments.output_dir, namer)

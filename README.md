@@ -1,6 +1,6 @@
 # doc-categoriser
 
-Extracts the text of documents (PDFs and images) to JSON files, then classifies each document into a category with a local LLM. No document leaves the machine.
+Extracts the text of documents (PDFs and images) to JSON files, then suggests a descriptive file name for each document from its content with a local LLM. No document leaves the machine. No file is renamed: the suggestions are written to JSON files.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ Then use `.venv\Scripts\doc-categoriser` in place of `uv run doc-categoriser` be
 
 ```sh
 uv run doc-categoriser extract <input_dir> <extracted_dir>
-uv run doc-categoriser classify <extracted_dir> <classified_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
+uv run doc-categoriser name <extracted_dir> <named_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
 ```
 
 ### extract
@@ -61,21 +61,23 @@ Output file:
 
 `method` is `text_layer` (text read from the PDF) or `ocr` (text recognised from the page image).
 
-### classify
+### name
 
-- Reads every `.json` file under `<extracted_dir>` and writes a file with the same relative path under `<classified_dir>`.
+- Reads every `.json` file under `<extracted_dir>` and writes a file with the same relative path under `<named_dir>`.
 - `--model`: path to the GGUF file (required).
-- `--categories`: TOML file with the categories (default `categories.toml` in the current folder). Edit `categories.toml` to change the categories. Each entry needs a `name` and a `description`.
+- The name has no fixed format. The model chooses words that describe the document, such as who issued it, what it is, and its date or period.
+- The name is made safe for Windows and macOS: characters such as `/ : * ?` are replaced or removed, and the length is limited to 120 characters. The extension of the original file is kept.
+- Two documents from the same folder never get the same name: the second gets ` (2)`, the third ` (3)`, and so on.
 - `--max-document-tokens`: only the first this many tokens of each document are read (default 1024). Lower is faster. Higher reads more of each document.
-- Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder, missing or unloadable model file, incorrect categories file, `--max-document-tokens` less than 1).
+- Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder, missing or unloadable model file, `--max-document-tokens` less than 1).
 
 Output file:
 
 ```json
 {
   "source_path": "/abs/path/inbox/statement.pdf",
-  "category": "bank_statement",
-  "reason": "The document is a DBS bank statement with an opening and closing balance."
+  "suggested_name": "DBS Bank Statement March 2026.pdf",
+  "reason": "The document is a bank statement from DBS covering March 2026."
 }
 ```
 
@@ -85,10 +87,9 @@ Output file:
 - `PdfExtractor`: reads the PDF text layer with pdfplumber. A page with almost no text is rendered to an image and OCR'd.
 - `ImageExtractor`: OCRs each frame of an image file.
 - `AppleVisionOcrEngine`: OCR through ocrmac (macOS). `UnavailableOcrEngine` is used on other systems.
-- `load_categories(path)`: reads the categories file.
-- `classify_document(document, categories, classifier)`: gives the document text to a classifier and returns the category and reason.
-- `LlamaCppClassifier`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to one of the category names.
-- `doc-categoriser extract` / `classify`: run the two stages on a folder.
+- `suggest_document_name(document, namer)`: gives the document text to a namer, then makes the answer a safe file name with the original extension.
+- `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
+- `doc-categoriser extract` / `name`: run the two stages on a folder.
 
 ## Tests
 
@@ -97,4 +98,4 @@ uv run pytest
 uv run pyright
 ```
 
-The classification tests use the model at `models/Qwen3.5-4B-Q4_K_M.gguf`, or the path in the environment variable `DOC_CATEGORISER_TEST_MODEL`. If the file is not there, these tests are skipped.
+The naming tests use the model at `models/Qwen3.5-4B-Q4_K_M.gguf`, or the path in the environment variable `DOC_CATEGORISER_TEST_MODEL`. If the file is not there, these tests are skipped.

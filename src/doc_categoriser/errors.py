@@ -1,4 +1,4 @@
-"""Errors raised by the extraction and classification stages. Their messages are written for the operator."""
+"""Errors raised by the extraction and naming stages. Their messages are written for the operator."""
 
 from pathlib import Path
 
@@ -30,13 +30,5 @@ class OcrUnavailableError(ExtractionError):
         super().__init__("a page needs OCR, and OCR is available on macOS only")
 
 
-class ClassificationError(Exception):
-    """A document could not be classified for a known reason."""
-
-
-class CategoryFileError(ClassificationError):
-    """Raised when the categories file is missing or not in the expected format."""
-
-    def __init__(self, path: Path, problem: str) -> None:
-        super().__init__(f"{path}: {problem}")
-        self.path = path
+class NamingError(Exception):
+    """A name could not be suggested for a document for a known reason."""

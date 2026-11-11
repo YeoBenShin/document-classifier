@@ -1,4 +1,4 @@
-"""Behaviour of the `doc-categoriser extract` and `classify` commands, run as an operator runs them."""
+"""Behaviour of the `doc-categoriser extract` and `name` commands, run as an operator runs them."""
 
 import json
 import subprocess
@@ -110,20 +110,20 @@ def test_extract_reports_a_password_protected_pdf_clearly(tmp_path: Path) -> Non
     assert "Failed: locked_statement.pdf: the PDF is password-protected" in result.stderr
 
 
-REPOSITORY_CATEGORIES_FILE = Path(__file__).resolve().parent.parent / "categories.toml"
+CHARACTERS_NOT_ALLOWED_IN_FILE_NAMES = set('<>:"/\\|?*')
 
 
-def run_classify(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
-    """Run `doc-categoriser classify <arguments>` and capture its output."""
+def run_name(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
+    """Run `doc-categoriser name <arguments>` and capture its output."""
     return subprocess.run(
-        [str(CLI_EXECUTABLE), "classify", *(str(argument) for argument in arguments)],
+        [str(CLI_EXECUTABLE), "name", *(str(argument) for argument in arguments)],
         capture_output=True,
         text=True,
         check=False,
     )
 
 
-def test_classify_writes_the_category_of_each_extracted_document_mirroring_folders(
+def test_name_writes_a_suggested_name_for_each_extracted_document_mirroring_folders(
     tmp_path: Path,
     test_model_path: Path,
     make_text_pdf: Callable[[str, list[PageLines]], Path],
@@ -132,32 +132,56 @@ def test_classify_writes_the_category_of_each_extracted_document_mirroring_folde
     input_dir = tmp_path / "inbox"
     (input_dir / "2026").mkdir(parents=True)
     make_text_pdf(
-        "statement.pdf",
-        [["DBS Bank Statement", "Account 123-456789-0", "Opening balance 1,250.00", "Closing balance 980.40"]],
-    ).rename(input_dir / "statement.pdf")
-    make_image("receipt.png", ["TAX INVOICE", "Invoice No. INV-2026-0042", "Amount due 312.50"]).rename(
-        input_dir / "2026" / "receipt.png"
+        "scan_0001.pdf",
+        [["DBS Bank Statement", "Account 123-456789-0", "Statement period 01/03/2026 - 31/03/2026", "Closing balance 980.40"]],
+    ).rename(input_dir / "scan_0001.pdf")
+    make_image("IMG_2231.png", ["TAX INVOICE", "Invoice No. INV-2026-0042", "Amount due 312.50"]).rename(
+        input_dir / "2026" / "IMG_2231.png"
     )
     extracted_dir = tmp_path / "extracted"
-    classified_dir = tmp_path / "classified"
+    named_dir = tmp_path / "named"
     assert run_extract(input_dir, extracted_dir).returncode == 0
 
-    result = run_classify(
-        extracted_dir, classified_dir, "--model", test_model_path, "--categories", REPOSITORY_CATEGORIES_FILE
-    )
+    result = run_name(extracted_dir, named_dir, "--model", test_model_path)
 
     assert result.returncode == 0, result.stderr
-    statement = json.loads((classified_dir / "statement.pdf.json").read_text())
-    assert statement["source_path"] == str((input_dir / "statement.pdf").resolve())
-    assert statement["category"] == "bank_statement"
+    statement = json.loads((named_dir / "scan_0001.pdf.json").read_text())
+    assert statement["source_path"] == str((input_dir / "scan_0001.pdf").resolve())
+    assert statement["suggested_name"].endswith(".pdf")
+    assert "statement" in statement["suggested_name"].lower()
+    assert not CHARACTERS_NOT_ALLOWED_IN_FILE_NAMES & set(statement["suggested_name"])
     assert statement["reason"].strip()
-    receipt = json.loads((classified_dir / "2026" / "receipt.png.json").read_text())
-    assert receipt["category"] == "invoice_receipt"
-    assert "Classified: statement.pdf.json -> bank_statement" in result.stdout
-    assert "Classified 2, failed 0" in result.stdout
+    invoice = json.loads((named_dir / "2026" / "IMG_2231.png.json").read_text())
+    assert invoice["suggested_name"].endswith(".png")
+    assert "invoice" in invoice["suggested_name"].lower()
+    assert f"Named: scan_0001.pdf.json -> {statement['suggested_name']}" in result.stdout
+    assert "Named 2, failed 0" in result.stdout
 
 
-def test_classify_reports_unusable_files_continues_and_exits_non_zero(
+def test_documents_in_the_same_folder_never_get_the_same_name(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    statement_lines: list[PageLines] = [["DBS Bank Statement", "Statement period 01/03/2026 - 31/03/2026", "Closing balance 980.40"]]
+    for file_name in ["copy_a.pdf", "copy_b.pdf", "copy_c.pdf"]:
+        make_text_pdf(file_name, statement_lines).rename(input_dir / file_name)
+    extracted_dir = tmp_path / "extracted"
+    named_dir = tmp_path / "named"
+    assert run_extract(input_dir, extracted_dir).returncode == 0
+
+    result = run_name(extracted_dir, named_dir, "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    names = [
+        json.loads((named_dir / f"{file_name}.json").read_text())["suggested_name"]
+        for file_name in ["copy_a.pdf", "copy_b.pdf", "copy_c.pdf"]
+    ]
+    first_stem = names[0].removesuffix(".pdf")
+    assert names == [f"{first_stem}.pdf", f"{first_stem} (2).pdf", f"{first_stem} (3).pdf"]
+
+
+def test_name_reports_unusable_files_continues_and_exits_non_zero(
     tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
 ) -> None:
     input_dir = tmp_path / "inbox"
@@ -176,18 +200,16 @@ def test_classify_reports_unusable_files_continues_and_exits_non_zero(
         ),
         encoding="utf-8",
     )
-    classified_dir = tmp_path / "classified"
+    named_dir = tmp_path / "named"
 
-    result = run_classify(
-        extracted_dir, classified_dir, "--model", test_model_path, "--categories", REPOSITORY_CATEGORIES_FILE
-    )
+    result = run_name(extracted_dir, named_dir, "--model", test_model_path)
 
     assert result.returncode == 1
-    assert sorted(path.name for path in classified_dir.rglob("*") if path.is_file()) == ["statement.pdf.json"]
+    assert sorted(path.name for path in named_dir.rglob("*") if path.is_file()) == ["statement.pdf.json"]
     assert "Failed: a_broken.pdf.json: the file is not an extracted document JSON file" in result.stderr
     assert "Failed: blank_scan.pdf.json: the document has no text" in result.stderr
     assert "Traceback" not in result.stderr
-    assert "Classified 1, failed 2" in result.stdout
+    assert "Named 1, failed 2" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -195,47 +217,30 @@ def test_classify_reports_unusable_files_continues_and_exits_non_zero(
     [
         ("missing_input_folder", "is not a folder"),
         ("missing_model", "is not a file"),
-        ("invalid_categories", "has no [[category]] entries"),
-        ("categories_is_a_folder", "cannot be read"),
         ("model_is_not_gguf", "cannot load the model"),
         ("zero_max_document_tokens", "must be 1 or more"),
     ],
 )
-def test_classify_rejects_incorrect_arguments_before_it_reads_any_document(
+def test_name_rejects_incorrect_arguments_before_it_reads_any_document(
     tmp_path: Path, test_model_path: Path, problem: str, expected_message: str
 ) -> None:
     extracted_dir = tmp_path / "extracted"
     extracted_dir.mkdir()
-    categories_file = tmp_path / "categories.toml"
-    categories_file.write_text('[[category]]\nname = "other"\ndescription = "Anything."\n', encoding="utf-8")
     model_path = test_model_path
     extra_arguments: list[str] = []
     if problem == "missing_input_folder":
         extracted_dir = tmp_path / "does_not_exist"
     elif problem == "missing_model":
         model_path = tmp_path / "missing.gguf"
-    elif problem == "invalid_categories":
-        categories_file.write_text('name = "other"\n', encoding="utf-8")
-    elif problem == "categories_is_a_folder":
-        categories_file = tmp_path / "categories_folder.toml"
-        categories_file.mkdir()
     elif problem == "model_is_not_gguf":
         model_path = tmp_path / "not_a_model.gguf"
         model_path.write_text("this is not a GGUF file", encoding="utf-8")
     else:
         extra_arguments = ["--max-document-tokens", "0"]
 
-    result = run_classify(
-        extracted_dir,
-        tmp_path / "classified",
-        "--model",
-        model_path,
-        "--categories",
-        categories_file,
-        *extra_arguments,
-    )
+    result = run_name(extracted_dir, tmp_path / "named", "--model", model_path, *extra_arguments)
 
     assert result.returncode == 2
     assert expected_message in result.stderr
     assert "Traceback" not in result.stderr
-    assert not (tmp_path / "classified").exists()
+    assert not (tmp_path / "named").exists()
