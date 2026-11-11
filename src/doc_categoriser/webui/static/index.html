@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Document Renamer</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --border: #dde1e7;
@@ -47,7 +48,7 @@
   .chip button { border: none; padding: 0 6px; background: transparent; }
   .muted { color: var(--muted); }
   .error { color: var(--failed); min-height: 1.4em; margin: 6px 0 0; }
-  .jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
   .job { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
   .job.selected { border-color: var(--accent); background: var(--hover); }
   .job .info { flex: 1; min-width: 0; }
@@ -128,6 +129,7 @@ async function openFolder(path) {
     renderFolders();
   } catch (error) {
     element("browse-error").textContent = error.message;
+    if (state.listing) element("current-path").value = state.listing.path;
   }
 }
 
