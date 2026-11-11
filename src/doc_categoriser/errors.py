@@ -27,7 +27,7 @@ class OcrUnavailableError(ExtractionError):
     """Raised when a page needs OCR but this system has no OCR engine."""
 
     def __init__(self) -> None:
-        super().__init__("a page has no text layer and OCR is available on macOS only")
+        super().__init__("a page needs OCR, and OCR is available on macOS only")
 
 
 class ClassificationError(Exception):

@@ -38,6 +38,8 @@ def _read_toml(path: Path) -> dict[str, Any]:
             return tomllib.load(categories_file)
     except FileNotFoundError as error:
         raise CategoryFileError(path, "does not exist") from error
+    except OSError as error:
+        raise CategoryFileError(path, f"cannot be read ({error.strerror})") from error
     except tomllib.TOMLDecodeError as error:
         raise CategoryFileError(path, f"is not valid TOML ({error})") from error
 

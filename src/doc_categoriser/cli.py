@@ -22,6 +22,17 @@ from doc_categoriser.json_output import (
 from doc_categoriser.llama_classifier import LlamaCppClassifier
 
 
+def positive_integer(text: str) -> int:
+    """Return `text` as an integer. Raise argparse.ArgumentTypeError if it is not a whole number of 1 or more."""
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from error
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text} is not allowed: the value must be 1 or more")
+    return value
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     """Return the parser for the `extract` and `classify` subcommands and their arguments."""
     parser = argparse.ArgumentParser(prog="doc-categoriser")
@@ -42,7 +53,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     classify_command.add_argument(
         "--max-document-tokens",
-        type=int,
+        type=positive_integer,
         default=1024,
         help="Only the first this many tokens of each document are read (default: %(default)s). Lower is faster.",
     )
@@ -76,15 +87,15 @@ def run_extract(input_dir: Path, output_dir: Path) -> int:
             skipped_count += 1
             continue
         except ExtractionError as error:
-            print(f"Failed: {display_name}: {error}", file=sys.stderr)
+            print(f"Failed: {display_name}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
         except Exception as error:
-            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr)
+            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
         write_document_json(document, output_path_for(source_path, input_dir, output_dir))
-        print(f"Extracted: {display_name}")
+        print(f"Extracted: {display_name}", flush=True)
         extracted_count += 1
     print(f"Extracted {extracted_count}, skipped {skipped_count}, failed {failed_count}")
     return 1 if failed_count else 0
@@ -104,15 +115,15 @@ def run_classify(
             document = read_document_json(json_path)
             classification = classify_document(document, categories, classifier)
         except ClassificationError as error:
-            print(f"Failed: {display_name}: {error}", file=sys.stderr)
+            print(f"Failed: {display_name}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
         except Exception as error:
-            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr)
+            print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
         write_classification_json(document.source_path, classification, output_dir / display_name)
-        print(f"Classified: {display_name} -> {classification.category}")
+        print(f"Classified: {display_name} -> {classification.category}", flush=True)
         classified_count += 1
     print(f"Classified {classified_count}, failed {failed_count}")
     return 1 if failed_count else 0
@@ -132,5 +143,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
     if not arguments.model.is_file():
         parser.error(f"{arguments.model} is not a file")
-    classifier = LlamaCppClassifier(arguments.model, max_document_tokens=arguments.max_document_tokens)
+    try:
+        classifier = LlamaCppClassifier(arguments.model, max_document_tokens=arguments.max_document_tokens)
+    except ValueError as error:
+        parser.error(f"{arguments.model}: cannot load the model ({error})")
     return run_classify(arguments.input_dir, arguments.output_dir, categories, classifier)

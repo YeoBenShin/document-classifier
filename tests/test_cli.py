@@ -196,6 +196,9 @@ def test_classify_reports_unusable_files_continues_and_exits_non_zero(
         ("missing_input_folder", "is not a folder"),
         ("missing_model", "is not a file"),
         ("invalid_categories", "has no [[category]] entries"),
+        ("categories_is_a_folder", "cannot be read"),
+        ("model_is_not_gguf", "cannot load the model"),
+        ("zero_max_document_tokens", "must be 1 or more"),
     ],
 )
 def test_classify_rejects_incorrect_arguments_before_it_reads_any_document(
@@ -206,17 +209,33 @@ def test_classify_rejects_incorrect_arguments_before_it_reads_any_document(
     categories_file = tmp_path / "categories.toml"
     categories_file.write_text('[[category]]\nname = "other"\ndescription = "Anything."\n', encoding="utf-8")
     model_path = test_model_path
+    extra_arguments: list[str] = []
     if problem == "missing_input_folder":
         extracted_dir = tmp_path / "does_not_exist"
     elif problem == "missing_model":
         model_path = tmp_path / "missing.gguf"
-    else:
+    elif problem == "invalid_categories":
         categories_file.write_text('name = "other"\n', encoding="utf-8")
+    elif problem == "categories_is_a_folder":
+        categories_file = tmp_path / "categories_folder.toml"
+        categories_file.mkdir()
+    elif problem == "model_is_not_gguf":
+        model_path = tmp_path / "not_a_model.gguf"
+        model_path.write_text("this is not a GGUF file", encoding="utf-8")
+    else:
+        extra_arguments = ["--max-document-tokens", "0"]
 
     result = run_classify(
-        extracted_dir, tmp_path / "classified", "--model", model_path, "--categories", categories_file
+        extracted_dir,
+        tmp_path / "classified",
+        "--model",
+        model_path,
+        "--categories",
+        categories_file,
+        *extra_arguments,
     )
 
     assert result.returncode == 2
     assert expected_message in result.stderr
+    assert "Traceback" not in result.stderr
     assert not (tmp_path / "classified").exists()

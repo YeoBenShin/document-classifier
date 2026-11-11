@@ -67,7 +67,7 @@ Output file:
 - `--model`: path to the GGUF file (required).
 - `--categories`: TOML file with the categories (default `categories.toml` in the current folder). Edit `categories.toml` to change the categories. Each entry needs a `name` and a `description`.
 - `--max-document-tokens`: only the first this many tokens of each document are read (default 1024). Lower is faster. Higher reads more of each document.
-- Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder, missing model file, incorrect categories file).
+- Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder, missing or unloadable model file, incorrect categories file, `--max-document-tokens` less than 1).
 
 Output file:
 
