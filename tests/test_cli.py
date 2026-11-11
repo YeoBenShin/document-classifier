@@ -14,10 +14,10 @@ from reportlab.pdfgen.canvas import Canvas
 CLI_EXECUTABLE = Path(sys.executable).parent / "doc-categoriser"
 
 
-def run_extract(input_dir: Path, output_dir: Path) -> subprocess.CompletedProcess[str]:
-    """Run `doc-categoriser extract <input_dir> <output_dir>` and capture its output."""
+def run_extract(input_dir: Path, output_dir: Path, *options: str) -> subprocess.CompletedProcess[str]:
+    """Run `doc-categoriser extract [options] <input_dir> <output_dir>` and capture its output."""
     return subprocess.run(
-        [str(CLI_EXECUTABLE), "extract", str(input_dir), str(output_dir)],
+        [str(CLI_EXECUTABLE), "extract", *options, str(input_dir), str(output_dir)],
         capture_output=True,
         text=True,
         check=False,
@@ -40,13 +40,13 @@ def test_extract_writes_one_json_file_per_document_mirroring_folders(
     result = run_extract(input_dir, output_dir)
 
     assert result.returncode == 0, result.stderr
-    statement = json.loads((output_dir / "statement.pdf.json").read_text())
+    statement = json.loads((output_dir / "statement.pdf.json").read_text(encoding="utf-8"))
     assert statement["source_path"] == str((input_dir / "statement.pdf").resolve())
     assert statement["file_type"] == "pdf"
     assert statement["pages"][0]["page_number"] == 1
     assert statement["pages"][0]["method"] == "text_layer"
     assert "DBS Bank Statement" in statement["pages"][0]["text"]
-    receipt = json.loads((output_dir / "2025" / "scans" / "receipt.png.json").read_text())
+    receipt = json.loads((output_dir / "2025" / "scans" / "receipt.png.json").read_text(encoding="utf-8"))
     assert receipt["file_type"] == "png"
     assert receipt["pages"] == [{"page_number": 1, "text": "TAX INVOICE\nAmount due 312.50", "method": "ocr"}]
 
@@ -110,6 +110,57 @@ def test_extract_reports_a_password_protected_pdf_clearly(tmp_path: Path) -> Non
     assert "Failed: locked_statement.pdf: the PDF is password-protected" in result.stderr
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows OCR is available on Windows")
+def test_extract_rejects_windows_ocr_on_another_platform(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+
+    result = run_extract(input_dir, tmp_path / "extracted", "--ocr-engine", "windows")
+
+    assert result.returncode == 2
+    assert "Windows OCR is available only on Windows" in result.stderr
+    assert not (tmp_path / "extracted").exists()
+
+
+NATIVE_OCR_ENGINE_FOR_PLATFORM = {"darwin": "apple-vision", "win32": "windows"}
+
+
+def test_extract_reads_scans_with_the_chosen_native_ocr_engine(
+    tmp_path: Path, make_image: Callable[[str, PageLines], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_image("receipt.png", ["TAX INVOICE", "Amount due 312.50"]).rename(input_dir / "receipt.png")
+    output_dir = tmp_path / "extracted"
+
+    result = run_extract(input_dir, output_dir, "--ocr-engine", NATIVE_OCR_ENGINE_FOR_PLATFORM[sys.platform])
+
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads((output_dir / "receipt.png.json").read_text(encoding="utf-8"))
+    assert receipt["pages"] == [{"page_number": 1, "text": "TAX INVOICE\nAmount due 312.50", "method": "ocr"}]
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="Apple Vision OCR is available on macOS")
+def test_extract_rejects_apple_vision_ocr_on_another_platform(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+
+    result = run_extract(input_dir, tmp_path / "extracted", "--ocr-engine", "apple-vision")
+
+    assert result.returncode == 2
+    assert "Apple Vision OCR is available only on macOS" in result.stderr
+
+
+def test_extract_lists_the_ocr_engines_for_an_unknown_engine(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+
+    result = run_extract(input_dir, tmp_path / "extracted", "--ocr-engine", "tesseract")
+
+    assert result.returncode == 2
+    assert "invalid choice: 'tesseract'" in result.stderr
+    assert "apple-vision" in result.stderr.split("invalid choice")[1]
+    assert "windows" in result.stderr.split("invalid choice")[1]
 CHARACTERS_NOT_ALLOWED_IN_FILE_NAMES = set('<>:"/\\|?*')
 
 

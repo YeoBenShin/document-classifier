@@ -7,7 +7,8 @@ Extracts the text of documents (PDFs and images) to JSON files, then suggests a 
 - Python 3.13 or later.
 - [uv](https://docs.astral.sh/uv/) (optional on Windows, see below).
 - A GGUF chat model file. Recommended: `Qwen3.5-4B-Q4_K_M.gguf` (2.7 GB) from <https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf>. Put it anywhere, for example `models/`.
-- OCR (for scanned pages and images) works on macOS only. On Windows and Linux, `extract` reads PDFs that have a text layer, and reports a failure for pages that need OCR.
+- For `extract`: macOS (OCR with the Apple Vision framework) or Windows 10 or later (OCR with Windows.Media.Ocr). Other systems have no OCR engine, and `extract` gives exit code `2`. `name` works on all systems.
+- On Windows, an OCR language pack for a language of the user profile. English is installed with an English Windows. To add one: Settings > Time & Language > Language.
 
 ## Install
 
@@ -36,10 +37,13 @@ Then use `.venv\Scripts\doc-categoriser` in place of `uv run doc-categoriser` be
 
 ```sh
 uv run doc-categoriser extract <input_dir> <extracted_dir>
+uv run doc-categoriser extract --ocr-engine windows <input_dir> <extracted_dir>
 uv run doc-categoriser name <extracted_dir> <named_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
 ```
 
 ### extract
+
+- `--ocr-engine`: `apple-vision` or `windows`. Default: the engine of the operating system (`apple-vision` on macOS, `windows` on Windows). An engine that cannot run on this operating system gives exit code `2`.
 
 - All files under `<input_dir>` are read, including subfolders. Hidden files and folders (names that start with `.`) are ignored.
 - For each document, the command writes `<extracted_dir>/<relative path>/<original name>.json`.
@@ -90,7 +94,9 @@ Output file:
 - `extract_document(path)`: selects an extractor by file suffix and returns the text, page by page.
 - `PdfExtractor`: reads the PDF text layer with pdfplumber. A page with almost no text is rendered to an image and OCR'd.
 - `ImageExtractor`: OCRs each frame of an image file.
-- `AppleVisionOcrEngine`: OCR through ocrmac (macOS). `UnavailableOcrEngine` is used on other systems.
+- `AppleVisionOcrEngine`: OCR through ocrmac (macOS).
+- `WindowsOcrEngine`: OCR through the Windows.Media.Ocr API, with the pywinrt packages (Windows).
+- Both OCR engines put the recognised text in reading order, one line for each visual row.
 - `suggest_document_name(document, namer)`: gives the document text to a namer, then builds `YYYY-MM-DD-<name><extension>` as a safe file name.
 - `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
 - `doc-categoriser extract` / `name`: run the two stages on a folder.
@@ -101,5 +107,7 @@ Output file:
 uv run pytest
 uv run pyright
 ```
+
+Tests use the real OCR engine of the operating system. GitHub Actions runs them on macOS and Windows (`.github/workflows/tests.yml`).
 
 The naming tests use the model at `models/Qwen3.5-4B-Q4_K_M.gguf`, or the path in the environment variable `DOC_CATEGORISER_TEST_MODEL`. If the file is not there, these tests are skipped.

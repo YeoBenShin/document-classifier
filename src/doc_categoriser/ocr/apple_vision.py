@@ -1,31 +1,12 @@
-"""OCR engines that turn a page image into text."""
+"""OCR with the macOS Vision framework. Importable only on macOS."""
 
-from dataclasses import dataclass
-from typing import Protocol
+# ocrmac installs only on macOS, so on other systems its types are unknown to pyright.
+# pyright: reportMissingImports=false
 
+from ocrmac import ocrmac
 from PIL import Image
 
-from doc_categoriser.errors import OcrUnavailableError
-
-
-class OcrEngine(Protocol):
-    """Turns an image of a page into plain text in reading order."""
-
-    def recognise_text(self, image: Image.Image) -> str: ...
-
-
-@dataclass(frozen=True)
-class _TextBox:
-    """One recognised text fragment with its position as fractions of the image size, origin at top left."""
-
-    text: str
-    left: float
-    top: float
-    height: float
-
-    @property
-    def vertical_centre(self) -> float:
-        return self.top + self.height / 2
+from doc_categoriser.ocr.layout import TextBox, boxes_to_text
 
 
 _LATIN_FOR_LOOKALIKE = str.maketrans(
@@ -62,27 +43,6 @@ def _latinise_lookalikes(text: str) -> str:
     return " ".join(_latinise_lookalike_word(word) for word in text.split(" "))
 
 
-def _group_into_rows(boxes: list[_TextBox]) -> list[list[_TextBox]]:
-    """Group boxes whose vertical centres fall inside the same row, top row first."""
-    rows: list[list[_TextBox]] = []
-    for box in sorted(boxes, key=lambda candidate: candidate.top):
-        current_row = rows[-1] if rows else None
-        if current_row is not None and abs(box.vertical_centre - current_row[0].vertical_centre) < current_row[0].height / 2:
-            current_row.append(box)
-        else:
-            rows.append([box])
-    return rows
-
-
-def _boxes_to_text(boxes: list[_TextBox]) -> str:
-    """Join boxes into lines, left to right within a row and top to bottom across rows."""
-    lines = [
-        " ".join(box.text for box in sorted(row, key=lambda candidate: candidate.left))
-        for row in _group_into_rows(boxes)
-    ]
-    return "\n".join(lines)
-
-
 class AppleVisionOcrEngine:
     """OCR with the macOS Vision framework, through ocrmac."""
 
@@ -92,23 +52,13 @@ class AppleVisionOcrEngine:
 
     def recognise_text(self, image: Image.Image) -> str:
         """Return the text in `image`, one line per visual row."""
-        from ocrmac import ocrmac
-
         observations = ocrmac.text_from_image(
             image,
             recognition_level="accurate",
             language_preference=self._language_preference,
         )
         boxes = [
-            _TextBox(text=_latinise_lookalikes(text), left=x, top=1.0 - (y + height), height=height)
+            TextBox(text=_latinise_lookalikes(text), left=x, top=1.0 - (y + height), height=height)
             for text, _confidence, (x, y, _width, height) in observations
         ]
-        return _boxes_to_text(boxes)
-
-
-class UnavailableOcrEngine:
-    """OCR engine for systems that have no OCR engine. Each call raises OcrUnavailableError."""
-
-    def recognise_text(self, image: Image.Image) -> str:
-        """Raise OcrUnavailableError."""
-        raise OcrUnavailableError()
+        return boxes_to_text(boxes)

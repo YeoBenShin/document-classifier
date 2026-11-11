@@ -3,7 +3,7 @@
 from doc_categoriser.errors import (
     ExtractionError,
     NamingError,
-    OcrUnavailableError,
+    OcrEngineUnavailableError,
     PasswordProtectedDocumentError,
     UnsupportedFileTypeError,
 )
@@ -21,7 +21,7 @@ __all__ = [
     "LlamaCppNamer",
     "NameSuggestion",
     "NamingError",
-    "OcrUnavailableError",
+    "OcrEngineUnavailableError",
     "PageText",
     "PasswordProtectedDocumentError",
     "UnsupportedFileTypeError",

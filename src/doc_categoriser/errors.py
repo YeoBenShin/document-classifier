@@ -23,11 +23,8 @@ class PasswordProtectedDocumentError(ExtractionError):
         self.path = path
 
 
-class OcrUnavailableError(ExtractionError):
-    """Raised when a page needs OCR but this system has no OCR engine."""
-
-    def __init__(self) -> None:
-        super().__init__("a page needs OCR, and OCR is available on macOS only")
+class OcrEngineUnavailableError(ExtractionError):
+    """Raised when the chosen OCR engine cannot run on this operating system or its parts are not installed."""
 
 
 class NamingError(Exception):
