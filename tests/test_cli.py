@@ -149,3 +149,13 @@ def test_extract_rejects_apple_vision_ocr_on_another_platform(tmp_path: Path) ->
 
     assert result.returncode == 2
     assert "Apple Vision OCR is available only on macOS" in result.stderr
+
+
+def test_extract_lists_the_ocr_engines_for_an_unknown_engine(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+
+    result = run_extract(input_dir, tmp_path / "extracted", "--ocr-engine", "tesseract")
+
+    assert result.returncode == 2
+    assert "invalid choice: 'tesseract' (choose from apple-vision, windows)" in result.stderr

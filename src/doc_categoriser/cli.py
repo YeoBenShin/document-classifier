@@ -20,8 +20,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     extract_command.add_argument("output_dir", type=Path, help="Folder for the JSON files. The subfolder structure is kept.")
     extract_command.add_argument(
         "--ocr-engine",
-        type=OcrEngineName,
-        choices=list(OcrEngineName),
+        choices=[engine_name.value for engine_name in OcrEngineName],
         default=None,
         help="OCR engine for scanned pages and images. Default: the engine of this operating system "
         "(apple-vision on macOS, windows on Windows).",
@@ -76,7 +75,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not arguments.input_dir.is_dir():
         parser.error(f"{arguments.input_dir} is not a folder")
     try:
-        ocr_engine = create_ocr_engine(arguments.ocr_engine or native_ocr_engine_name())
+        ocr_engine = create_ocr_engine(OcrEngineName(arguments.ocr_engine) if arguments.ocr_engine else native_ocr_engine_name())
     except OcrEngineUnavailableError as error:
         parser.error(str(error))
     return run_extract(arguments.input_dir, arguments.output_dir, default_extractors(ocr_engine))
