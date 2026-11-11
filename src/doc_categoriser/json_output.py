@@ -6,7 +6,7 @@ from typing import Any
 
 from doc_categoriser.errors import NamingError
 from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
-from doc_categoriser.naming import NameSuggestion
+from doc_categoriser.classification.naming import NameSuggestion
 
 
 def document_to_json_dict(document: ExtractedDocument) -> dict[str, Any]:

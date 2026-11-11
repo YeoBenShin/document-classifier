@@ -10,7 +10,7 @@ from typing import Any
 from llama_cpp import Llama
 
 from doc_categoriser.errors import NamingError
-from doc_categoriser.naming import NameSuggestion
+from doc_categoriser.classification.naming import NameSuggestion
 
 _SYSTEM_PROMPT = (
     "You name document files. Read the document text from the user and suggest a short, descriptive file name "

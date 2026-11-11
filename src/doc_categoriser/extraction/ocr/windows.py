@@ -12,7 +12,7 @@ from winrt.windows.media.ocr import OcrLine, OcrResult
 from winrt.windows.storage.streams import DataWriter
 
 from doc_categoriser.errors import OcrEngineUnavailableError
-from doc_categoriser.ocr.layout import TextBox, boxes_to_text
+from doc_categoriser.extraction.ocr.layout import TextBox, boxes_to_text
 
 
 def _fit_within(image: Image.Image, max_dimension: int) -> Image.Image:

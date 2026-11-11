@@ -10,7 +10,7 @@ from pdfplumber.utils.exceptions import PdfminerException
 
 from doc_categoriser.errors import PasswordProtectedDocumentError
 from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
-from doc_categoriser.ocr import OcrEngine
+from doc_categoriser.extraction.ocr import OcrEngine
 
 
 class PdfExtractor:

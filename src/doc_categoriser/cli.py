@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from doc_categoriser.classification import DocumentNamer, LlamaCppNamer, suggest_document_name, unique_name
 from doc_categoriser.errors import ExtractionError, NamingError, OcrEngineUnavailableError, UnsupportedFileTypeError
 from doc_categoriser.extraction import DocumentExtractor, default_extractors, extract_document
 from doc_categoriser.json_output import (
@@ -18,9 +19,7 @@ from doc_categoriser.json_output import (
     write_document_json,
     write_name_suggestion_json,
 )
-from doc_categoriser.llama_namer import LlamaCppNamer
-from doc_categoriser.naming import DocumentNamer, suggest_document_name, unique_name
-from doc_categoriser.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
+from doc_categoriser.extraction.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
 
 
 def positive_integer(text: str) -> int:

@@ -6,7 +6,7 @@ from PIL import Image, ImageSequence
 from pillow_heif import register_heif_opener
 
 from doc_categoriser.models import ExtractedDocument, ExtractionMethod, PageText
-from doc_categoriser.ocr import OcrEngine
+from doc_categoriser.extraction.ocr import OcrEngine
 
 register_heif_opener()
 

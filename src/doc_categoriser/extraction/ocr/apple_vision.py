@@ -6,7 +6,7 @@
 from ocrmac import ocrmac
 from PIL import Image
 
-from doc_categoriser.ocr.layout import TextBox, boxes_to_text
+from doc_categoriser.extraction.ocr.layout import TextBox, boxes_to_text
 
 
 _LATIN_FOR_LOOKALIKE = str.maketrans(

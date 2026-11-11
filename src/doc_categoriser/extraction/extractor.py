@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Protocol
 
 from doc_categoriser.errors import UnsupportedFileTypeError
-from doc_categoriser.image_extractor import ImageExtractor
+from doc_categoriser.extraction.image_extractor import ImageExtractor
 from doc_categoriser.models import ExtractedDocument
-from doc_categoriser.ocr import OcrEngine, create_ocr_engine, native_ocr_engine_name
-from doc_categoriser.pdf_extractor import PdfExtractor
+from doc_categoriser.extraction.ocr import OcrEngine, create_ocr_engine, native_ocr_engine_name
+from doc_categoriser.extraction.pdf_extractor import PdfExtractor
 
 
 class DocumentExtractor(Protocol):

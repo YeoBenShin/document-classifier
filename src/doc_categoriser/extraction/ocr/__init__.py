@@ -25,13 +25,13 @@ class OcrEngineName(StrEnum):
 
 
 def _create_apple_vision_engine() -> OcrEngine:
-    from doc_categoriser.ocr.apple_vision import AppleVisionOcrEngine
+    from doc_categoriser.extraction.ocr.apple_vision import AppleVisionOcrEngine
 
     return AppleVisionOcrEngine()
 
 
 def _create_windows_engine() -> OcrEngine:
-    from doc_categoriser.ocr.windows import WindowsOcrEngine
+    from doc_categoriser.extraction.ocr.windows import WindowsOcrEngine
 
     return WindowsOcrEngine()
 

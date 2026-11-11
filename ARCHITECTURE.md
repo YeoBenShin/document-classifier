@@ -9,7 +9,7 @@ input folder ──> doc-categoriser extract ──> folder of extracted JSON �
                   (pdfplumber, OCR)                                         (local GGUF model)
 ```
 
-- `src/doc_categoriser/`: the extraction and naming library and the CLI. See its `ARCHITECTURE.md`.
+- `src/doc_categoriser/`: the library and the CLI. `extraction/` and `classification/` hold one stage each. See its `ARCHITECTURE.md`.
 - `tests/`: tests at the public seams (library and CLI). See its `ARCHITECTURE.md`.
 - `models/` (not committed): the GGUF model files.
 
