@@ -158,4 +158,6 @@ def test_extract_lists_the_ocr_engines_for_an_unknown_engine(tmp_path: Path) -> 
     result = run_extract(input_dir, tmp_path / "extracted", "--ocr-engine", "tesseract")
 
     assert result.returncode == 2
-    assert "invalid choice: 'tesseract' (choose from apple-vision, windows)" in result.stderr
+    assert "invalid choice: 'tesseract'" in result.stderr
+    assert "apple-vision" in result.stderr.split("invalid choice")[1]
+    assert "windows" in result.stderr.split("invalid choice")[1]
