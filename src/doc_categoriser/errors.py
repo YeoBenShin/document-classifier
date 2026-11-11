@@ -21,3 +21,7 @@ class PasswordProtectedDocumentError(ExtractionError):
     def __init__(self, path: Path) -> None:
         super().__init__("the PDF is password-protected")
         self.path = path
+
+
+class OcrEngineUnavailableError(ExtractionError):
+    """Raised when the chosen OCR engine cannot run on this operating system or its parts are not installed."""

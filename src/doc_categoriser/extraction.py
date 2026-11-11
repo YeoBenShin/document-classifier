@@ -7,7 +7,7 @@ from typing import Protocol
 from doc_categoriser.errors import UnsupportedFileTypeError
 from doc_categoriser.image_extractor import ImageExtractor
 from doc_categoriser.models import ExtractedDocument
-from doc_categoriser.ocr import AppleVisionOcrEngine
+from doc_categoriser.ocr import OcrEngine, create_ocr_engine, native_ocr_engine_name
 from doc_categoriser.pdf_extractor import PdfExtractor
 
 
@@ -20,9 +20,13 @@ class DocumentExtractor(Protocol):
     def extract(self, path: Path) -> ExtractedDocument: ...
 
 
-def default_extractors() -> list[DocumentExtractor]:
-    """Return the extractors for PDF and image files, sharing one Apple Vision OCR engine."""
-    ocr_engine = AppleVisionOcrEngine()
+def default_extractors(ocr_engine: OcrEngine | None = None) -> list[DocumentExtractor]:
+    """
+    Return the extractors for PDF and image files, sharing one OCR engine.
+    If `ocr_engine` is None, the native engine of this operating system is used.
+    """
+    if ocr_engine is None:
+        ocr_engine = create_ocr_engine(native_ocr_engine_name())
     return [PdfExtractor(ocr_engine=ocr_engine), ImageExtractor(ocr_engine=ocr_engine)]
 
 

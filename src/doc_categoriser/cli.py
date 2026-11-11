@@ -1,13 +1,14 @@
-"""Command-line interface: `doc-categoriser extract <input_dir> <output_dir>`."""
+"""Command-line interface: `doc-categoriser extract [--ocr-engine NAME] <input_dir> <output_dir>`."""
 
 import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from doc_categoriser.errors import ExtractionError, UnsupportedFileTypeError
-from doc_categoriser.extraction import default_extractors, extract_document
+from doc_categoriser.errors import ExtractionError, OcrEngineUnavailableError, UnsupportedFileTypeError
+from doc_categoriser.extraction import DocumentExtractor, default_extractors, extract_document
 from doc_categoriser.json_output import output_path_for, write_document_json
+from doc_categoriser.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -17,6 +18,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     extract_command = subcommands.add_parser("extract", help="Extract the text of every document in a folder to JSON files.")
     extract_command.add_argument("input_dir", type=Path, help="Folder with the source documents. Subfolders are included.")
     extract_command.add_argument("output_dir", type=Path, help="Folder for the JSON files. The subfolder structure is kept.")
+    extract_command.add_argument(
+        "--ocr-engine",
+        type=OcrEngineName,
+        choices=list(OcrEngineName),
+        default=None,
+        help="OCR engine for scanned pages and images. Default: the engine of this operating system "
+        "(apple-vision on macOS, windows on Windows).",
+    )
     return parser
 
 
@@ -30,13 +39,12 @@ def find_source_files(input_dir: Path) -> list[Path]:
     return sorted(path for path in input_dir.rglob("*") if path.is_file() and not is_hidden(path, input_dir))
 
 
-def run_extract(input_dir: Path, output_dir: Path) -> int:
+def run_extract(input_dir: Path, output_dir: Path, extractors: list[DocumentExtractor]) -> int:
     """
     Extract every file under `input_dir` into JSON files under `output_dir`.
     Unsupported files are skipped. A file that fails is reported and the run continues.
     Return 1 if any file failed, otherwise 0.
     """
-    extractors = default_extractors()
     extracted_count = skipped_count = failed_count = 0
     for source_path in find_source_files(input_dir):
         display_name = source_path.relative_to(input_dir)
@@ -67,4 +75,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     if not arguments.input_dir.is_dir():
         parser.error(f"{arguments.input_dir} is not a folder")
-    return run_extract(arguments.input_dir, arguments.output_dir)
+    try:
+        ocr_engine = create_ocr_engine(arguments.ocr_engine or native_ocr_engine_name())
+    except OcrEngineUnavailableError as error:
+        parser.error(str(error))
+    return run_extract(arguments.input_dir, arguments.output_dir, default_extractors(ocr_engine))
