@@ -28,7 +28,7 @@ from doc_categoriser.json_output import (
     write_name_suggestion_json,
 )
 from doc_categoriser.extraction.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
-from doc_categoriser.renaming import RenameOutcome, rename_document
+from doc_categoriser.renaming import RenameOutcome, name_with_folder, rename_document
 
 
 def positive_integer(text: str) -> int:
@@ -153,7 +153,7 @@ def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer) -> int:
 
 def run_rename(input_dir: Path, dry_run: bool) -> int:
     """
-    Rename the source document of every `.json` file under `input_dir` to its suggested name, in the folder where it is.
+    Rename the source document of every `.json` file under `input_dir` to `<folder>-<suggested name>`, in the folder where it is.
     With `dry_run`, change no file. No file is overwritten, and no two documents get the same new name in one folder.
     A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
     """
@@ -163,7 +163,8 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
     for json_path in (path for path in find_source_files(input_dir) if path.suffix.lower() == ".json"):
         display_name = json_path.relative_to(input_dir)
         try:
-            source_path, new_name = read_name_suggestion_json(json_path)
+            source_path, suggested_name = read_name_suggestion_json(json_path)
+            new_name = name_with_folder(source_path, suggested_name)
             new_name_key = (source_path.parent, new_name.lower())
             if new_name_key in new_names_in_use:
                 raise RenamingError(f"another document already gets the name {new_name} in {source_path.parent}")

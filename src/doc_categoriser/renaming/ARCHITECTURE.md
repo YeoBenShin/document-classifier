@@ -5,6 +5,10 @@ The renaming stage. Gives each source document the file name that the classifica
 ## How it works
 
 ```
+renamer.name_with_folder(source_path, suggested_name)
+    ├── check_new_name on the suggested name
+    └── <folder>-<suggested name>, folder name made safe ──> new_name
+
 renamer.rename_document(source_path, new_name, dry_run)
     ├── check_new_name: one valid file name, same extension as the source
     ├── source gone, file with new_name there         ──> ALREADY_RENAMED
@@ -13,14 +17,20 @@ renamer.rename_document(source_path, new_name, dry_run)
     └── rename in the same folder (skipped if dry_run) ──> RENAMED
 ```
 
-- `__init__.py`: exports `RenameOutcome`, `check_new_name` and `rename_document`.
-- `renamer.py`: `RenameOutcome` (`RENAMED`, `ALREADY_RENAMED`), `check_new_name()` and `rename_document()`. `check_new_name` raises `RenamingError` if the name is empty, is `.` or `..`, starts or ends with a space or a dot, contains `< > : " / \ | ? *` or a control character, or has an extension different from the source (case is ignored). `rename_document` raises `RenamingError` if another file already has the new name, or if neither the source nor a file with the new name exists. It never overwrites a file. A change of case only (`statement.pdf` to `Statement.pdf`) is a rename.
+- `__init__.py`: exports `RenameOutcome`, `check_new_name`, `name_with_folder` and `rename_document`.
+- `renamer.py`: `RenameOutcome` (`RENAMED`, `ALREADY_RENAMED`), `check_new_name()`, `name_with_folder()` and `rename_document()`. `name_with_folder` removes characters not allowed in file names from the folder name, changes whitespace and `_` to `-`, and raises `RenamingError` if no usable character stays. `check_new_name` raises `RenamingError` if the name is empty, is `.` or `..`, starts or ends with a space or a dot, contains `< > : " / \ | ? *` or a control character, or has an extension different from the source (case is ignored). `rename_document` raises `RenamingError` if another file already has the new name, or if neither the source nor a file with the new name exists. It never overwrites a file. A change of case only (`statement.pdf` to `Statement.pdf`) is a rename.
 
 ## Decisions
 
 ### Rename in place
 
 - The document stays in its folder. Only its name changes. The operator already sorted the documents into folders, and the suggested names are unique only in each folder.
+
+### Folder name in front
+
+- The operator sorts the documents into folders by meaning (for example `Bank Statements`). The folder name in front keeps that meaning in the file name when the file is copied out of its folder, and puts files of one folder together when sorted.
+- It is added at rename, not at `name`. The suggestion JSON holds only the name from the content, and the folder is read from the source path at the time of the rename.
+- The folder name gets the same separator rules as the suggested name (`-`, no spaces), so the full name uses one separator.
 
 ### No overwrite
 

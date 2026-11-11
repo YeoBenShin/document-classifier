@@ -1,6 +1,7 @@
 """Entry point that gives a source document the file name suggested for it, in the folder where it is."""
 
 import os
+import re
 from enum import StrEnum
 from pathlib import Path
 
@@ -33,6 +34,21 @@ def check_new_name(source_path: Path, new_name: str) -> None:
         raise RenamingError(
             f"the suggested name changes the file extension from {source_path.suffix or '(none)'} to {new_extension or '(none)'}"
         )
+
+
+def name_with_folder(source_path: Path, suggested_name: str) -> str:
+    """
+    Return `<folder>-<suggested_name>`, where `<folder>` is the name of the folder of `source_path`:
+    characters not allowed in file names are removed, whitespace and `_` become `-`, repeated `-` become one,
+    and separators (space, `_`, `-`, `.`) at the start and end are removed.
+    Raise RenamingError if `suggested_name` is not valid (see check_new_name), or if the folder name has no usable characters.
+    """
+    check_new_name(source_path, suggested_name)
+    folder = "".join(character for character in source_path.parent.name if character not in _CHARACTERS_NOT_ALLOWED)
+    folder = re.sub(r"-{2,}", "-", re.sub(r"[\s_]+", "-", folder)).strip(" _-.")
+    if not re.search(r"\w", folder):
+        raise RenamingError(f"the folder name of {source_path} has no characters usable in a file name")
+    return f"{folder}-{suggested_name}"
 
 
 def rename_document(source_path: Path, new_name: str, *, dry_run: bool = False) -> RenameOutcome:

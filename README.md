@@ -93,7 +93,7 @@ Output file:
 
 ### rename
 
-- Reads every `.json` file under `<named_dir>`. For each, renames the file at `source_path` to `suggested_name`, in the same folder.
+- Reads every `.json` file under `<named_dir>`. For each, renames the file at `source_path` to `<folder>-<suggested_name>`, in the same folder. `<folder>` is the name of the folder that holds the file, with spaces and `_` changed to `-` (`Bank Statements/scan.pdf` becomes `Bank-Statements-2026-03-31-DBS-Bank-Statement.pdf`).
 - `--dry-run`: shows what would be renamed, and changes no file.
 - A file is never overwritten. If a different file already has the name, or two documents of one folder get the same name, the document is reported as failed and is not renamed.
 - The suggested name must be one file name (no `/`, `\`, `..`) with the same extension as the source. Otherwise the document fails. The JSON files can be edited by hand before the rename.
@@ -103,9 +103,9 @@ Output file:
 Output:
 
 ```
-Renamed: statement.pdf.json: statement.pdf -> 2026-03-31-DBS-Bank-Statement.pdf
-Already renamed: 2026/IMG_2231.png.json: undated-Tax-Invoice.png
-Failed: a.pdf.json: a file named 2026-03-31-DBS-Bank-Statement.pdf already exists in /abs/path/inbox
+Renamed: statement.pdf.json: statement.pdf -> inbox-2026-03-31-DBS-Bank-Statement.pdf
+Already renamed: 2026/IMG_2231.png.json: 2026-undated-Tax-Invoice.png
+Failed: a.pdf.json: a file named inbox-2026-03-31-DBS-Bank-Statement.pdf already exists in /abs/path/inbox
 Renamed 1, already renamed 1, failed 1
 ```
 
@@ -119,6 +119,7 @@ Renamed 1, already renamed 1, failed 1
 - Both OCR engines put the recognised text in reading order, one line for each visual row.
 - `suggest_document_name(document, namer)`: gives the document text to a namer, then builds `YYYY-MM-DD-<name><extension>` as a safe file name.
 - `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
+- `name_with_folder(source_path, suggested_name)`: puts the folder name in front of the suggested name.
 - `rename_document(source_path, new_name)`: checks the name, then renames the file in its folder. Never overwrites.
 - `doc-categoriser extract` / `name` / `rename`: run the three stages on a folder.
 

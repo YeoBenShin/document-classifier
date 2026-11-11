@@ -35,8 +35,9 @@ Renaming (`doc-categoriser rename`):
 ```
 for each name suggestion JSON file:
 cli.py ──> json_output.read_name_suggestion_json(path) ──> (source path, suggested name)
+cli.py ──> renaming.name_with_folder(source_path, suggested_name) ──> <folder>-<suggested name>
 cli.py ──> checks no other document of this run gets the same name in the same folder
-cli.py ──> renaming.rename_document(source_path, suggested_name, dry_run)
+cli.py ──> renaming.rename_document(source_path, new_name, dry_run)
            <── renaming.RenameOutcome (renamed, already renamed)
 ```
 
@@ -44,7 +45,7 @@ cli.py ──> renaming.rename_document(source_path, suggested_name, dry_run)
 - `models.py`: `ExtractedDocument` (source path + list of `PageText`), `PageText` (page number, text, `ExtractionMethod`).
 - `errors.py`: `ExtractionError` and its subclasses `UnsupportedFileTypeError`, `PasswordProtectedDocumentError` and `OcrEngineUnavailableError`. `NamingError`. `RenamingError`. Their messages are written for the operator.
 - `json_output.py`: converts an `ExtractedDocument` to JSON and back (`read_document_json`), writes and reads the name suggestion JSON (`read_name_suggestion_json`), and calculates the output path.
-- `cli.py`: `extract` creates the OCR engine from `--ocr-engine` (exit code 2 if it is unavailable), finds the files, runs `extract_document` on each, writes the JSON, prints a summary. `name` checks the arguments (folder, model file, `--max-document-tokens` of 1 or more) before it loads the model, reports a model that cannot load as an argument error, then suggests a name for each `.json` file, makes the names unique in each folder, and prints a summary. `rename` renames the source of each `.json` file (or only reports with `--dry-run`), fails a document whose new name another document of the run already gets in the same folder, and prints a summary. In all commands, a failure on one file does not stop the run.
+- `cli.py`: `extract` creates the OCR engine from `--ocr-engine` (exit code 2 if it is unavailable), finds the files, runs `extract_document` on each, writes the JSON, prints a summary. `name` checks the arguments (folder, model file, `--max-document-tokens` of 1 or more) before it loads the model, reports a model that cannot load as an argument error, then suggests a name for each `.json` file, makes the names unique in each folder, and prints a summary. `rename` renames the source of each `.json` file to `<folder>-<suggested name>` (or only reports with `--dry-run`), fails a document whose new name another document of the run already gets in the same folder, and prints a summary. In all commands, a failure on one file does not stop the run.
 
 ## Decisions
 

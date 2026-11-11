@@ -360,9 +360,9 @@ def test_extract_name_and_rename_give_each_document_its_suggested_name(
     result = run_rename(named_dir)
 
     assert result.returncode == 0, result.stderr
-    assert file_names(input_dir) == sorted([statement_name, f"2026/{invoice_name}"])
-    assert (input_dir / statement_name).read_bytes() == statement_bytes
-    assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> {statement_name}" in result.stdout
+    assert file_names(input_dir) == sorted([f"inbox-{statement_name}", f"2026/2026-{invoice_name}"])
+    assert (input_dir / f"inbox-{statement_name}").read_bytes() == statement_bytes
+    assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> inbox-{statement_name}" in result.stdout
     assert "Renamed 2, already renamed 0, failed 0" in result.stdout
 
 
@@ -377,8 +377,8 @@ def test_rename_again_reports_documents_that_already_have_their_names(tmp_path: 
     result = run_rename(named_dir)
 
     assert result.returncode == 0, result.stderr
-    assert file_names(input_dir) == ["2026-03-31-DBS-Statement.pdf"]
-    assert "Already renamed: scan_0001.pdf.json: 2026-03-31-DBS-Statement.pdf" in result.stdout
+    assert file_names(input_dir) == ["inbox-2026-03-31-DBS-Statement.pdf"]
+    assert "Already renamed: scan_0001.pdf.json: inbox-2026-03-31-DBS-Statement.pdf" in result.stdout
     assert "Renamed 0, already renamed 1, failed 0" in result.stdout
 
 
@@ -393,27 +393,27 @@ def test_rename_dry_run_changes_no_file(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert file_names(input_dir) == ["scan_0001.pdf"]
-    assert "Would rename: scan_0001.pdf.json: scan_0001.pdf -> 2026-03-31-DBS-Statement.pdf" in result.stdout
+    assert "Would rename: scan_0001.pdf.json: scan_0001.pdf -> inbox-2026-03-31-DBS-Statement.pdf" in result.stdout
     assert "Would rename 1, already renamed 0, failed 0" in result.stdout
 
 
 def test_rename_changes_only_the_case_of_a_name(tmp_path: Path) -> None:
     input_dir = tmp_path / "inbox"
     input_dir.mkdir()
-    (input_dir / "statement.pdf").write_bytes(b"statement")
+    (input_dir / "inbox-statement.pdf").write_bytes(b"statement")
     named_dir = tmp_path / "named"
-    write_suggestion(named_dir, "statement.pdf.json", input_dir / "statement.pdf", "Statement.pdf")
+    write_suggestion(named_dir, "statement.pdf.json", input_dir / "inbox-statement.pdf", "Statement.pdf")
 
     result = run_rename(named_dir)
 
     assert result.returncode == 0, result.stderr
-    assert file_names(input_dir) == ["Statement.pdf"]
+    assert file_names(input_dir) == ["inbox-Statement.pdf"]
 
 
 def test_rename_never_overwrites_a_file_and_reports_each_problem(tmp_path: Path) -> None:
     input_dir = tmp_path / "inbox"
     input_dir.mkdir()
-    for file_name in ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf", "taken.pdf", "ok.pdf"]:
+    for file_name in ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf", "inbox-taken.pdf", "ok.pdf"]:
         (input_dir / file_name).write_bytes(file_name.encode())
     named_dir = tmp_path / "named"
     write_suggestion(named_dir, "a.pdf.json", input_dir / "a.pdf", "taken.pdf")
@@ -428,12 +428,14 @@ def test_rename_never_overwrites_a_file_and_reports_each_problem(tmp_path: Path)
     result = run_rename(named_dir)
 
     assert result.returncode == 1
-    assert file_names(input_dir) == sorted(["2026-03-31-Ok.pdf", "a.pdf", "c.pdf", "d.pdf", "e.pdf", "same.pdf", "taken.pdf"])
-    assert (input_dir / "taken.pdf").read_bytes() == b"taken.pdf"
-    assert (input_dir / "same.pdf").read_bytes() == b"b.pdf"
+    assert file_names(input_dir) == sorted(
+        ["inbox-2026-03-31-Ok.pdf", "a.pdf", "c.pdf", "d.pdf", "e.pdf", "inbox-same.pdf", "inbox-taken.pdf"]
+    )
+    assert (input_dir / "inbox-taken.pdf").read_bytes() == b"inbox-taken.pdf"
+    assert (input_dir / "inbox-same.pdf").read_bytes() == b"b.pdf"
     assert not (tmp_path / "escaped.pdf").exists()
-    assert "Failed: a.pdf.json: a file named taken.pdf already exists in " in result.stderr
-    assert "Failed: c.pdf.json: another document already gets the name SAME.pdf in " in result.stderr
+    assert "Failed: a.pdf.json: a file named inbox-taken.pdf already exists in " in result.stderr
+    assert "Failed: c.pdf.json: another document already gets the name inbox-SAME.pdf in " in result.stderr
     assert "Failed: d.pdf.json: the suggested name '../escaped.pdf' is not a valid file name" in result.stderr
     assert "Failed: e.pdf.json: the suggested name changes the file extension from .pdf to .png" in result.stderr
     assert "Failed: gone.pdf.json: the source file " in result.stderr
@@ -454,8 +456,21 @@ def test_rename_dry_run_reports_two_documents_with_the_same_new_name(tmp_path: P
     result = run_rename(named_dir, "--dry-run")
 
     assert result.returncode == 1
-    assert "Failed: c.pdf.json: another document already gets the name same.pdf in " in result.stderr
+    assert "Failed: c.pdf.json: another document already gets the name inbox-same.pdf in " in result.stderr
     assert "Would rename 1, already renamed 0, failed 1" in result.stdout
+
+
+def test_rename_puts_the_folder_name_in_front_made_safe_for_file_names(tmp_path: Path) -> None:
+    input_dir = tmp_path / "Bank  Statements_2026."
+    input_dir.mkdir()
+    (input_dir / "scan_0001.pdf").write_bytes(b"statement")
+    named_dir = tmp_path / "named"
+    write_suggestion(named_dir, "scan_0001.pdf.json", input_dir / "scan_0001.pdf", "2026-03-31-DBS-Statement.pdf")
+
+    result = run_rename(named_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert file_names(input_dir) == ["Bank-Statements-2026-2026-03-31-DBS-Statement.pdf"]
 
 
 def test_rename_rejects_a_missing_folder(tmp_path: Path) -> None:
