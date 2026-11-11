@@ -51,8 +51,8 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 
 ### Constrained output
 
-- The model answer is constrained by a JSON schema (llama.cpp grammar): `reason` (text) then `name` (text). The output is always JSON.
-- The schema is `reason`, `date_text`, `date`, `name`. `reason` comes before `name`, so the model writes a short explanation before it names the document. The operator also uses the reason to examine a doubtful name.
+- The model answer is constrained by a JSON schema (llama.cpp grammar): `reason`, `date_text`, `date` (`YYYY-MM-DD` or empty), `name`. The output is always JSON.
+- `reason` comes before `name`, so the model writes a short explanation before it names the document. The operator also uses the reason to examine a doubtful name.
 
 ### Only the start of each document
 
