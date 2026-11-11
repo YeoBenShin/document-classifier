@@ -1,0 +1,39 @@
+[project]
+name = "doc-categoriser"
+version = "0.1.0"
+description = "Extract the text content of documents (PDFs and images) for later categorisation."
+readme = "README.md"
+authors = [
+    { name = "YeoBenShin", email = "orang3cats@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "ocrmac>=1.0.1",
+    "pdfplumber>=0.11.10",
+    "pillow-heif>=1.8.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "reportlab>=5.1.0",
+]
+
+[project.scripts]
+doc-categoriser = "doc_categoriser.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
