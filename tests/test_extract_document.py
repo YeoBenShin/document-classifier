@@ -147,10 +147,10 @@ def test_scan_larger_than_10000_pixels_is_read_with_ocr(tmp_path: Path) -> None:
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=200)
     draw.text((600, 900), "Custody statement", fill="black", font=font)
-    draw.text((600, 1400), "Total holdings 8,120,000", fill="black", font=font)
+    draw.text((600, 1400), "Account 4471 closed", fill="black", font=font)
     image_path = tmp_path / "high_resolution_scan.png"
     image.save(image_path)
 
     document = extract_document(image_path)
 
-    assert document.pages[0].text.splitlines() == ["Custody statement", "Total holdings 8,120,000"]
+    assert document.pages[0].text.splitlines() == ["Custody statement", "Account 4471 closed"]
