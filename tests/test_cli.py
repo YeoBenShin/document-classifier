@@ -146,14 +146,15 @@ def test_name_writes_a_suggested_name_for_each_extracted_document_mirroring_fold
 
     assert result.returncode == 0, result.stderr
     statement = json.loads((named_dir / "scan_0001.pdf.json").read_text())
+    invoice = json.loads((named_dir / "2026" / "IMG_2231.png.json").read_text())
     assert statement["source_path"] == str((input_dir / "scan_0001.pdf").resolve())
     assert statement["suggested_name"].startswith("2026-03-31-")
     assert statement["document_date"] == "2026-03-31"
     assert statement["suggested_name"].endswith(".pdf")
     assert "statement" in statement["suggested_name"].lower()
     assert not CHARACTERS_NOT_ALLOWED_IN_FILE_NAMES & set(statement["suggested_name"])
+    assert not {" ", "_"} & set(statement["suggested_name"] + invoice["suggested_name"])
     assert statement["reason"].strip()
-    invoice = json.loads((named_dir / "2026" / "IMG_2231.png.json").read_text())
     assert invoice["suggested_name"].startswith("undated-")
     assert invoice["document_date"] is None
     assert invoice["suggested_name"].endswith(".png")
@@ -182,7 +183,7 @@ def test_documents_in_the_same_folder_never_get_the_same_name(
         for file_name in ["copy_a.pdf", "copy_b.pdf", "copy_c.pdf"]
     ]
     first_stem = names[0].removesuffix(".pdf")
-    assert names == [f"{first_stem}.pdf", f"{first_stem} (2).pdf", f"{first_stem} (3).pdf"]
+    assert names == [f"{first_stem}.pdf", f"{first_stem}-(2).pdf", f"{first_stem}-(3).pdf"]
 
 
 def test_name_reports_unusable_files_continues_and_exits_non_zero(

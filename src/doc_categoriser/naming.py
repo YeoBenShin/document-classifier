@@ -65,7 +65,7 @@ def _safe_name_stem(raw_name: str, extension: str, document_date: datetime.date 
     Return `raw_name` as the descriptive part of a file name that Windows and macOS accept:
     characters not allowed in file names are replaced or removed, whitespace is collapsed,
     a copy of `extension` at the end and copies of `document_date` (YYYY-MM-DD) are removed,
-    the length is limited to MAX_NAME_STEM_CHARACTERS, and separators (space, `_`, `-`, `.`) at the start and end are removed.
+    spaces and `_` become `-` and repeated `-` become one, the length is limited to MAX_NAME_STEM_CHARACTERS, and separators (space, `_`, `-`, `.`) at the start and end are removed.
     Windows removes dots and spaces at the end of a file name, and a cut can leave a separator at the end.
     """
     stem = " ".join(raw_name.translate(_CHARACTER_REPLACEMENTS).split())
@@ -73,6 +73,7 @@ def _safe_name_stem(raw_name: str, extension: str, document_date: datetime.date 
         stem = stem[: -len(extension)]
     if document_date is not None:
         stem = _without_date(stem, document_date)
+    stem = re.sub(r"-{2,}", "-", re.sub(r"[\s_]+", "-", stem))
     stem = stem.lstrip(_SEPARATORS)[:MAX_NAME_STEM_CHARACTERS].rstrip(_SEPARATORS)
     if not re.search(r"\w", stem):
         raise NamingError("the model gave no usable name")
@@ -87,14 +88,14 @@ def _without_date(stem: str, document_date: datetime.date) -> str:
 
 def unique_name(name: str, names_in_use: set[str]) -> str:
     """
-    Return `name`, or `name` with " (2)", " (3)" and so on before the extension if it is already in `names_in_use`.
+    Return `name`, or `name` with "-(2)", "-(3)" and so on before the extension if it is already in `names_in_use`.
     The comparison ignores case, as on Windows and macOS. The returned name is added to `names_in_use` in lowercase.
     """
     stem, dot, extension = name.rpartition(".") if "." in name else (name, "", "")
     candidate = name
     copy_number = 2
     while candidate.lower() in names_in_use:
-        candidate = f"{stem} ({copy_number}){dot}{extension}"
+        candidate = f"{stem}-({copy_number}){dot}{extension}"
         copy_number += 1
     names_in_use.add(candidate.lower())
     return candidate

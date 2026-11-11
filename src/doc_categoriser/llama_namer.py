@@ -18,9 +18,11 @@ _SYSTEM_PROMPT = (
     "Use the words that identify the document, such as who issued it and what it is. Use at most 12 words. Do not add a file extension. Do not put the date in the name.\n"
     "Also give the date of the document. In date_text, copy exactly the words of the document that state its date, "
     "or give an empty string. In date, give that date as YYYY-MM-DD: the date it was issued, or if it shows no issue date, "
-    "the last day of the period it covers (for the period 01/03/2026 - 31/03/2026, the date is 2026-03-31). Use only a date that the document states as a date. "
+    "the last day of the statement period it covers (for the period 01/03/2026 - 31/03/2026, the date is 2026-03-31). "
+    "If it shows neither, use another date that the document states, such as a due date or a start date. Use only a date that the document states as a date. "
     "A year in a reference number, invoice number or account number is not a date. "
-    "If the document shows only a month and a year, use the first day of that month. "
+    "If the date shows only a month and a year, the date is the first day of that month, also for a period or a valuation "
+    "(for 'as at March 2026', the date is 2026-03-01). "
     "If the document shows no day and month, give an empty string.\n"
     'Reply with JSON only: {"reason": "<one sentence>", "date_text": "<words from the document or empty>", '
     '"date": "<YYYY-MM-DD or empty>", "name": "<file name>"}.'

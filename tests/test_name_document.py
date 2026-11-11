@@ -72,6 +72,18 @@ class FixedAnswerNamer:
             "2026-03-01-",
             ["portfolio"],
         ),
+        (
+            "AIA Singapore\nPremium Due Notice\nPolicy HealthShield Gold Max A\nPremium due date 01 Oct 2026\n"
+            "Amount due 1,245.00",
+            "2026-10-01-",
+            ["premium"],
+        ),
+        (
+            "Great Eastern Life Assurance\nPolicy Schedule\nPolicy number 0098-7766\n"
+            "Commencement date 1 January 2026\nExpiry date 31 December 2065\nSum assured 500,000.00",
+            "2026-01-01-",
+            ["policy"],
+        ),
     ],
 )
 def test_document_gets_its_date_and_a_name_that_describes_its_content_with_a_reason(
@@ -109,16 +121,17 @@ def test_a_document_without_text_is_reported_and_not_given_to_the_model(llama_na
 @pytest.mark.parametrize(
     ("model_name", "source_file_name", "expected_name"),
     [
-        ("DBS Statement 01/03/2026 - 15/03/2026", "scan.pdf", "2026-03-31-DBS Statement 01-03-2026 - 15-03-2026.pdf"),
-        ('Invoice: "Bright Web" <INV|42>?*', "receipt.PNG", "2026-03-31-Invoice - Bright Web INV-42.PNG"),
-        ("  Letter   from\tIRAS \n", "letter.pdf", "2026-03-31-Letter from IRAS.pdf"),
-        ("Notice of Assessment 2026.pdf", "notice.pdf", "2026-03-31-Notice of Assessment 2026.pdf"),
-        ("Policy schedule...", "policy.pdf", "2026-03-31-Policy schedule.pdf"),
+        ("DBS Statement 01/03/2026 - 15/03/2026", "scan.pdf", "2026-03-31-DBS-Statement-01-03-2026-15-03-2026.pdf"),
+        ('Invoice: "Bright Web" <INV|42>?*', "receipt.PNG", "2026-03-31-Invoice-Bright-Web-INV-42.PNG"),
+        ("  Letter   from\tIRAS \n", "letter.pdf", "2026-03-31-Letter-from-IRAS.pdf"),
+        ("Notice of Assessment 2026.pdf", "notice.pdf", "2026-03-31-Notice-of-Assessment-2026.pdf"),
+        ("Policy schedule...", "policy.pdf", "2026-03-31-Policy-schedule.pdf"),
+        ("Tan_Wei Ming__Bank -_ Statement", "scan.pdf", "2026-03-31-Tan-Wei-Ming-Bank-Statement.pdf"),
         ("CON", "scan.pdf", "2026-03-31-CON.pdf"),
         ("A" * 300, "scan.pdf", "2026-03-31-" + "A" * 120 + ".pdf"),
-        ("Board_" * 30, "scan.pdf", "2026-03-31-" + "Board_" * 19 + "Board.pdf"),
-        ("DBS_Bank_Statement_2026-03-31", "scan.pdf", "2026-03-31-DBS_Bank_Statement.pdf"),
-        ("2026-03-31 DBS Bank Statement", "scan.pdf", "2026-03-31-DBS Bank Statement.pdf"),
+        ("Board_" * 30, "scan.pdf", "2026-03-31-" + "Board-" * 19 + "Board.pdf"),
+        ("DBS_Bank_Statement_2026-03-31", "scan.pdf", "2026-03-31-DBS-Bank-Statement.pdf"),
+        ("2026-03-31 DBS Bank Statement", "scan.pdf", "2026-03-31-DBS-Bank-Statement.pdf"),
     ],
 )
 def test_the_suggested_name_is_a_safe_file_name_with_the_original_extension(
@@ -140,7 +153,7 @@ def test_a_suggested_name_with_no_usable_characters_is_reported(model_name: str)
 def test_a_document_without_a_date_gets_the_undated_prefix() -> None:
     suggestion = suggest_document_name(make_document("Some text"), FixedAnswerNamer("Meeting notes", document_date=None))
 
-    assert suggestion.name == "undated-Meeting notes.pdf"
+    assert suggestion.name == "undated-Meeting-notes.pdf"
 
 
 def test_a_name_that_is_only_the_date_is_reported() -> None:

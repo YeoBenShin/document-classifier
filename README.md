@@ -65,12 +65,12 @@ Output file:
 
 - Reads every `.json` file under `<extracted_dir>` and writes a file with the same relative path under `<named_dir>`.
 - `--model`: path to the GGUF file (required).
-- Name format: `YYYY-MM-DD-<name><extension>`, for example `2026-03-31-DBS Bank Statement.pdf`.
-- The date is the date the document was issued. If it shows no issue date, the last day of the period it covers. If it shows only a month and a year, the first day of that month.
+- Name format: `YYYY-MM-DD-<name><extension>`, for example `2026-03-31-DBS-Bank-Statement.pdf`. In the `<name>` part, spaces and `_` become `-`.
+- The date is the date the document was issued. If it shows no issue date, the last day of the statement period it covers. If it shows neither, another date that the document states, such as a due date or a start date. If the date shows only a month and a year, the first day of that month.
 - A document that shows no date, or whose date cannot be confirmed in its text, gets `undated-<name><extension>`.
 - The `<name>` part has no fixed format. The model chooses words that describe the document, such as who issued it and what it is.
 - The name is made safe for Windows and macOS: characters such as `/ : * ?` are replaced or removed, and the `<name>` part is limited to 120 characters. The extension of the original file is kept.
-- Two documents from the same folder never get the same name: the second gets ` (2)`, the third ` (3)`, and so on.
+- Two documents from the same folder never get the same name: the second gets `-(2)`, the third `-(3)`, and so on, before the extension.
 - `--max-document-tokens`: only the first this many tokens of each document are read (default 1024). Lower is faster. Higher reads more of each document.
 - Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder, missing or unloadable model file, `--max-document-tokens` less than 1).
 
@@ -79,7 +79,7 @@ Output file:
 ```json
 {
   "source_path": "/abs/path/inbox/statement.pdf",
-  "suggested_name": "2026-03-31-DBS Bank Statement.pdf",
+  "suggested_name": "2026-03-31-DBS-Bank-Statement.pdf",
   "document_date": "2026-03-31",
   "reason": "The document is a bank statement from DBS covering March 2026."
 }
