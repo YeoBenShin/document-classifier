@@ -5,7 +5,8 @@
 - `conftest.py`: builders that make sample documents in a temporary folder: PDFs with a text layer (reportlab), image-only PDFs, PDFs with both page types, and image files (Pillow). The `test_model_path` and `llama_namer` fixtures give the GGUF model (one load for the whole session).
 - `test_extract_document.py`: tests the extraction library seam, `extract_document(path)`.
 - `test_name_document.py`: tests the naming library seam, `suggest_document_name(document, namer)`.
-- `test_cli.py`: tests the CLI seam, including `--ocr-engine`. It runs the installed `doc-categoriser` command in a subprocess and examines the JSON files, stdout, stderr and exit code. The name tests run `extract` first, as an operator does. One rename test runs `extract`, `name` and `rename`. The other rename tests write the name suggestion JSON directly, so they need no model and can use exact unsafe names (`../`, changed extension, names that already exist).
+- `test_cli.py`: tests the CLI seam, including `--ocr-engine`. It runs the installed `doc-categoriser` command in a subprocess and examines the JSON files, stdout, stderr and exit code. The name tests run `extract` first, as an operator does. One rename test runs `extract`, `name` and `rename`. The `run` tests run the full pipeline command with the real model. The other rename tests write the name suggestion JSON directly, so they need no model and can use exact unsafe names (`../`, changed extension, names that already exist).
+- `test_web_ui.py`: tests the web interface through its HTTP API, as the page uses it. The server runs in a thread on a free port. Most tests give the job queue a fake pipeline command (a short Python script that logs, then waits for a `release` file in the folder) so the order of the queue and cancel can be tested exactly. One test runs the real `doc-categoriser run` with the real model.
 
 ## Decisions
 
@@ -38,6 +39,10 @@
 - The naming tests use the real Qwen3.5 4B GGUF model. The most likely errors are in how the program uses llama-cpp-python (chat template, JSON schema, context size, truncation), and a fake namer does not find those errors.
 - The model file is 2.7 GB and is not committed. The tests read `models/Qwen3.5-4B-Q4_K_M.gguf` or the path in `DOC_CATEGORISER_TEST_MODEL`, and skip if the file is not there.
 - The model chooses the words of a name freely. Thus the tests check only words that any good name must contain (for example `statement` for a bank statement), not the full name. The temperature is 0, so the result is stable.
+
+### Fake pipeline command for the queue
+
+- The queue tests must hold a job in the `running` state to test the order of the queue and the cancel of a running job. The real pipeline finishes in a few seconds and cannot be held. The command is a parameter of `JobQueue`, so the tests give a script that waits for a file. The real command is tested in one end-to-end test.
 
 ### One stub namer for safe-name rules
 

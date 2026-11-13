@@ -41,6 +41,8 @@ uv run doc-categoriser extract --ocr-engine windows <input_dir> <extracted_dir>
 uv run doc-categoriser name <extracted_dir> <named_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
 uv run doc-categoriser rename --dry-run <named_dir>
 uv run doc-categoriser rename <named_dir>
+uv run doc-categoriser run <input_dir> <work_dir> --model models/Qwen3.5-4B-Q4_K_M.gguf
+uv run doc-categoriser web [<folder>]
 ```
 
 ### extract
@@ -109,6 +111,35 @@ Failed: a.pdf.json: a file named inbox-2026-03-31-DBS-Bank-Statement.pdf already
 Renamed 1, already renamed 1, failed 1
 ```
 
+### run
+
+- Runs `extract`, `name` and `rename` on `<input_dir>`, one after the other, in one process. The model is loaded once, before extraction.
+- Writes the extracted JSON to `<work_dir>/extracted/` and the name suggestion JSON to `<work_dir>/named/`. When the renaming stage has finished, `<work_dir>/extracted/` is deleted. A cancelled run keeps it. Files under `<work_dir>` are not extracted, so `<work_dir>` can be inside `<input_dir>`.
+- Renames without a pause for review. Use the three separate commands to examine the names first.
+- Options: `--model` (required), `--ocr-engine`, `--max-document-tokens`, as for `extract` and `name`.
+- A failed document does not stop the run. The next stages use the documents that did not fail.
+- Output: a line `== Stage N of 3: ...` before each stage, then the output of that stage.
+- Exit code: `0` if no document failed, `1` if one or more documents failed in any stage, `2` for incorrect arguments (missing folder, missing or unloadable model file, unavailable OCR engine).
+
+### web
+
+```sh
+uv run doc-categoriser web                      # opens at the current folder
+uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
+```
+
+- Starts a local web server and opens the interface in the web browser. Stop it with Ctrl+C (this cancels the running folder).
+- In the interface:
+  - Browse folders (click a name to open it, `Up` for the parent, or type a path). Select one or more folders with the checkboxes, then `Add to queue`.
+  - Each queued folder runs `doc-categoriser run` in a child process. One folder runs at a time, in queue order.
+  - Click a folder in the queue to see its log, live.
+  - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: all documents are extracted and named again, and a document that already has its new name (`<folder>-<suggested name>`) is reported as `Already renamed`.
+  - `Decisions folder`: each queued folder gets the subfolder `<folder name>-<date>-<time>-<job number>` here, with `named/` (the rename decisions). `extracted/` is there during the run, and is deleted when the renaming has finished. Default: `renaming-decision` in the current folder.
+  - `Model file`: the GGUF file. Default: `models/Qwen3.5-4B-Q4_K_M.gguf` in the current folder.
+- Options: `--output-dir` and `--model` (the defaults shown in the interface), `--host` (default `127.0.0.1`), `--port` (default `8765`, `0` for a free port), `--no-browser`.
+- Status of a folder: `Queued`, `Running`, `Done` (exit code 0), `Done with errors` (exit code 1: some documents failed, see the log), `Failed` (other exit code, for example a model file that cannot load), `Cancelled`.
+- The queue and the logs are kept in memory only. They are lost when the server stops. The JSON files stay in the decisions folder.
+
 ## Moving parts
 
 - `extract_document(path)`: selects an extractor by file suffix and returns the text, page by page.
@@ -122,6 +153,8 @@ Renamed 1, already renamed 1, failed 1
 - `name_with_folder(source_path, suggested_name)`: puts the folder name in front of the suggested name.
 - `rename_document(source_path, new_name)`: checks the name, then renames the file in its folder. Never overwrites.
 - `doc-categoriser extract` / `name` / `rename`: run the three stages on a folder.
+- `doc-categoriser run`: runs the three stages on a folder in one process.
+- `doc-categoriser web`: a local HTTP server (Python standard library) with one page. A queue thread runs `doc-categoriser run` for each queued folder in a child process, and keeps its output as the log.
 
 ## Tests
 
