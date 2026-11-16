@@ -5,3 +5,4 @@ __pycache__/
 models/
 renaming-decision/
 .DS_Store
+bin/

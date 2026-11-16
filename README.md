@@ -173,6 +173,39 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
 - Status of a folder: `Queued`, `Running`, `Done` (exit code 0), `Done with errors` (exit code 1: some documents failed, see the log), `Failed` (other exit code, for example a model file that cannot load, or duplicate documents in one folder), `Cancelled`.
 - The queue and the logs are kept in memory only. They are lost when the server stops. The JSON files stay in the decisions folder.
 
+### Start the web interface with a double-click
+
+Run one of these snippets in a terminal, in this project folder. It makes the script `bin/doc-classifier` (macOS) or `bin\doc-classifier.bat` (Windows), with the path of this folder in it. `bin/` is not in git, because the script holds a path of this machine. Double-click the script to start the web interface. The script goes to the project folder first, so the default `Model file` and `Decisions folder` are found. A terminal window opens and shows the log. Close the window (or Ctrl+C) to stop the server.
+
+macOS (Terminal, zsh or bash):
+
+```sh
+mkdir -p ./bin
+cat > ./bin/doc-classifier <<EOF
+#!/bin/zsh
+export PATH="\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+cd "$PWD" || exit 1
+uv run doc-categoriser web
+EOF
+chmod +x ./bin/doc-classifier
+```
+
+Windows (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force .\bin | Out-Null
+@"
+@echo off
+cd /d "$PWD" || (pause & exit /b 1)
+uv run doc-categoriser web
+pause
+"@ | Set-Content .\bin\doc-classifier.bat -Encoding ASCII
+```
+
+Without uv, change `uv run doc-categoriser web` to `.venv\Scripts\doc-categoriser web`.
+
+To open at a folder, add it at the end of the `web` line, for example `uv run doc-categoriser web ~/Documents/inbox`.
+
 ## Moving parts
 
 - `extract_document(path)`: selects an extractor by file suffix and returns the text, page by page.
