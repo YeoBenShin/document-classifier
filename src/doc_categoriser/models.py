@@ -23,7 +23,11 @@ class PageText:
 
 @dataclass(frozen=True)
 class ExtractedDocument:
-    """The text content of one source file, page by page."""
+    """
+    The text content of one source file, page by page.
+    `ocr_engine`: the name of the OCR engine used for the pages with the OCR method (for example `apple-vision`). None if not known.
+    """
 
     source_path: Path
     pages: list[PageText]
+    ocr_engine: str | None = None

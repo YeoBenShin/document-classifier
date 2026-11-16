@@ -1,6 +1,6 @@
 # renaming
 
-The renaming stage. Gives each source document the file name that the classification stage suggested, in the folder where the document is.
+The renaming stage. Gives each source document the file name that the classification stage suggested, in the folder where the document is, and keeps the rename history of each folder.
 
 ## How it works
 
@@ -15,9 +15,23 @@ renamer.rename_document(source_path, new_name, dry_run)
     ├── source already has new_name (same case)       ──> ALREADY_RENAMED
     ├── other file has new_name                       ──> RenamingError
     └── rename in the same folder (skipped if dry_run) ──> RENAMED
+
+history (file <folder>/.doc-categoriser-renames.jsonl)
+    ├── file_sha256(path)             ──> SHA-256 of the content, lowercase hex
+    ├── ensure_history_file(folder)   creates an empty file if none
+    ├── read_history(folder)          ──> (records in file order, number of bad lines); bad lines reported on stderr
+    ├── last_record_by_hash(records)  ──> {sha256: last RenameRecord}
+    ├── append_history(folder, record) one JSON line at the end
+    ├── write_history(folder, records) replaces the file (temporary file, then os.replace)
+    └── is_done(record, model, ocr_engine)
+            no record or other model                     ──> False
+            method text_layer                            ──> True
+            method ocr and same OCR engine               ──> True
+            otherwise                                    ──> False
 ```
 
-- `__init__.py`: exports `RenameOutcome`, `check_new_name`, `name_with_folder` and `rename_document`.
+- `__init__.py`: exports the functions of `renamer.py` and `history.py`.
+- `history.py`: `RenameRecord` (original name, new name, SHA-256, rename time, method, OCR engine, model), `HISTORY_FILE_NAME`, `file_sha256()`, `ensure_history_file()`, `read_history()`, `last_record_by_hash()`, `append_history()`, `write_history()`, `current_time_text()`, `is_done()`. The CLI decides when to write a line. See the root `ARCHITECTURE.md` for the reasons of the history.
 - `renamer.py`: `RenameOutcome` (`RENAMED`, `ALREADY_RENAMED`), `check_new_name()`, `name_with_folder()` and `rename_document()`. `name_with_folder` removes characters not allowed in file names from the folder name, changes whitespace and `_` to `-`, and raises `RenamingError` if no usable character stays. `check_new_name` raises `RenamingError` if the name is empty, is `.` or `..`, starts or ends with a space or a dot, contains `< > : " / \ | ? *` or a control character, or has an extension different from the source (case is ignored). `rename_document` raises `RenamingError` if another file already has the new name, or if neither the source nor a file with the new name exists. It never overwrites a file. A change of case only (`statement.pdf` to `Statement.pdf`) is a rename.
 
 ## Decisions
@@ -39,7 +53,9 @@ renamer.rename_document(source_path, new_name, dry_run)
 
 ### Safe to run again
 
+- `run` leaves out the files that the rename history shows as done. The rules below apply to `rename` alone, and to files that `run` processes again.
 - After a rename, the JSON still holds the old source path. A second run finds the source gone and a file with the new name in its folder, and reports `already renamed`. A run that stopped part way can run again.
+- For a document found already renamed, a history line is added only if the last line for its SHA-256 has a different new name, method, OCR engine or model. A document processed again with a new model can get the same name. Its new line records the new model, so the next `run` leaves it out. A repeated `rename` adds no duplicate lines.
 - The check for "already has the new name" compares the exact name in the folder listing, because on a case-insensitive file system the old path still exists after a change of case only.
 
 ### Check the name again

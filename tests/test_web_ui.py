@@ -288,7 +288,7 @@ def test_queued_folder_is_extracted_named_and_renamed_with_the_real_pipeline(
 
         log = web_ui.log(job["id"])
         assert web_ui.job(job["id"])["status"] == "succeeded", log
-        [new_name] = [path.name for path in input_dir.iterdir()]
+        [new_name] = [path.name for path in input_dir.iterdir() if not path.name.startswith(".")]
         assert new_name.startswith("inbox-")
         assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> {new_name}" in log
         assert "Renamed 1, already renamed 0, failed 0" in log

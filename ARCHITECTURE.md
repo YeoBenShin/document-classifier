@@ -20,7 +20,16 @@ browser page ──HTTP (poll each second)──> web server ──> job queue t
 - `tests/`: tests at the public seams (library and CLI). See its `ARCHITECTURE.md`.
 - `models/` (not committed): the GGUF model files.
 
-The extracted JSON files are the contract between extraction and naming. Each file holds the source path, the file type, and the text of each page with the method used. The name suggestion JSON files hold the source path, the suggested name and the reason. They are the contract between naming and renaming.
+The extracted JSON files are the contract between extraction and naming. Each file holds the source path, the file type, the OCR engine of the run, and the text of each page with the method used. The name suggestion JSON files hold the source path, the suggested name, the reason, the extraction method (`ocr` or `text_layer`), the OCR engine and the model file name. They are the contract between naming and renaming.
+
+The rename history (`.doc-categoriser-renames.jsonl`, hidden, one in each document folder) records each rename with the SHA-256 of the file, the method, OCR engine and model. The run settings move with each document from stage to stage:
+
+```
+extract: OCR engine name ──> extracted JSON ──> name: + method (from page methods) + model file name ──> name suggestion JSON
+rename: name suggestion JSON ──> appends one history line in the folder of the document
+run: hashes the documents ──> stops if one folder has two with the same SHA-256
+     ──> removes history lines that match no file ──> leaves out files whose SHA-256 is done with this model and OCR engine
+```
 
 ## Decisions
 
@@ -74,6 +83,22 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 - `run` renames without a pause for review. It is for folders where the operator accepts the model names. The three separate commands stay for a review before the rename.
 - `run` deletes its extracted JSON and name suggestion JSON when the renaming stage has finished. See `src/doc_categoriser/ARCHITECTURE.md`.
 - `run` loads the model before extraction. A model file that cannot load stops the run at once with exit code 2, before OCR (slow) and before any change.
+
+### Rename history in each document folder
+
+- An operator runs the same folder again: after a cancel, after new files are added, or with a new model. Without a record, every document was extracted and named again (slow), and a document already renamed could get a different name from the model on the second pass.
+- The history is in the document folder, not in the decisions folder. The decisions folder is deleted after each run, and the web interface gives each run a new one. The history moves with the folder when the operator moves it.
+- The file is hidden (leading dot), so `find_source_files` never reads it as a document, and an operator who browses the folder does not see it.
+- JSON Lines, and a rename adds a line at the end: a cancelled run keeps every line written before the cancel. The old name of each document stays readable.
+- A file is matched by the SHA-256 of its content, not by its name. With a match by name, a file renamed by hand was processed again and lost the operator's name, and a different file with a recorded name (a scan replaced under the same name, or a PDF edited and saved) was left out. A rename does not change the content, so the hash stays the same after our rename. Reading each file once for the hash is fast compared to OCR and the model.
+- Two documents of one folder with the same content stop the run before any change. A record then matches both files, and the copy that was not renamed would be left out with its old name. The operator decides which copy to keep. Only supported file types are checked: copies of other files are never renamed, so they are no problem.
+- The duplicate check is per folder, as the history is. The same file in two folders gets a different name in each (the folder name is in front).
+- `run` removes the lines whose SHA-256 matches no file of the folder. Without this, the file grows with each deleted or changed document, and a line for a file that is gone has no use. A changed file thus loses its old line and is processed again. The file is written to a temporary file first, then moved over the history, so a stop during the write does not leave a half file.
+- Another model is processed again, because a new model is usually chosen to give better names.
+- Another OCR engine is processed again only for documents that used OCR. A PDF with a text layer gives the same text with each engine, so processing it again gives no new result.
+- The history lines are written by `rename`, not by `run`. Thus the three separate commands also write the history. The method and model come through the stage JSON files, because `rename` loads no model and does not extract.
+- Only `run` leaves files out, removes lines and checks for duplicates. `extract` does not know the model, so it cannot apply the rule.
+- The model is identified by its file name, not its path. The same file in another folder is the same model.
 
 ### Web interface
 

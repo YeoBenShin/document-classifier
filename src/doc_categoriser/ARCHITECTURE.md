@@ -16,7 +16,7 @@ cli.py ──> extraction.ocr.create_ocr_engine(--ocr-engine or extraction.ocr.n
        ──> extraction.default_extractors(ocr_engine)
        ──> extraction.extract_document(path, extractors)
            <── models.ExtractedDocument
-cli.py ──> json_output.write_document_json(...)
+cli.py ──> json_output.write_document_json(document with the OCR engine name)
 ```
 
 Classification (`doc-categoriser name`):
@@ -28,35 +28,44 @@ cli.py ──> json_output.read_document_json(path) ──> models.ExtractedDocu
 cli.py ──> classification.suggest_document_name(document, namer)
            <── classification.NameSuggestion (name, reason, document date)
 cli.py ──> classification.unique_name(name, names used in the same folder)
-cli.py ──> json_output.write_name_suggestion_json(...)
+cli.py ──> json_output.write_name_suggestion_json(..., method (ocr if any page is OCR, else text_layer), OCR engine, model file name)
 ```
 
 Renaming (`doc-categoriser rename`):
 
 ```
 for each name suggestion JSON file:
-cli.py ──> json_output.read_name_suggestion_json(path) ──> (source path, suggested name)
+cli.py ──> json_output.read_name_suggestion_json(path) ──> NameSuggestionFile (source path, suggested name, method, OCR engine, model)
 cli.py ──> renaming.name_with_folder(source_path, suggested_name) ──> <folder>-<suggested name>
 cli.py ──> checks no other document of this run gets the same name in the same folder
 cli.py ──> renaming.rename_document(source_path, new_name, dry_run)
            <── renaming.RenameOutcome (renamed, already renamed)
+cli.py ──> renaming.append_history(folder, RenameRecord with renaming.file_sha256 of the renamed file)
+           (not with dry_run; for already renamed, only if the last line for that SHA-256 differs)
 ```
 
 Full pipeline (`doc-categoriser run`):
 
 ```
 cli.py ──> creates the OCR engine and loads the model (exit code 2 if either fails)
-cli.py ──> run_extract(input_dir, <work_dir>/extracted, files under work_dir excluded)
-cli.py ──> run_name(<work_dir>/extracted, <work_dir>/named)
+cli.py ──> find_source_files (files under work_dir excluded)
+cli.py ──> hash_documents: renaming.file_sha256 of each file with a supported suffix
+cli.py ──> report_duplicate_documents: two or more files of one folder with the same SHA-256
+           ──> prints them, returns exit code 3 before the work folder is created
+cli.py ──> select_files_to_process: for each folder with files, renaming.ensure_history_file + renaming.read_history,
+           renaming.write_history without the lines that match no SHA-256 of the folder,
+           leaves out files where renaming.is_done(last record for its SHA-256, model file name, OCR engine)
+cli.py ──> run_extract(input_dir, <work_dir>/extracted, selected files)
+cli.py ──> run_name(<work_dir>/extracted, <work_dir>/named, model file name)
 cli.py ──> run_rename(<work_dir>/named)
 cli.py ──> deletes <work_dir>/extracted and <work_dir>/named, then <work_dir> if empty
            exit code: the highest exit code of the three stages
 ```
 
 - `__init__.py`: the public library API. Exports the stage functions, protocols, models and errors.
-- `models.py`: `ExtractedDocument` (source path + list of `PageText`), `PageText` (page number, text, `ExtractionMethod`).
+- `models.py`: `ExtractedDocument` (source path + list of `PageText` + OCR engine name or None), `PageText` (page number, text, `ExtractionMethod`).
 - `errors.py`: `ExtractionError` and its subclasses `UnsupportedFileTypeError`, `PasswordProtectedDocumentError` and `OcrEngineUnavailableError`. `NamingError`. `RenamingError`. Their messages are written for the operator.
-- `json_output.py`: converts an `ExtractedDocument` to JSON and back (`read_document_json`), writes and reads the name suggestion JSON (`read_name_suggestion_json`), and calculates the output path.
+- `json_output.py`: converts an `ExtractedDocument` to JSON and back (`read_document_json`), writes and reads the name suggestion JSON (`read_name_suggestion_json` returns `NameSuggestionFile`; `method`, `ocr_engine` and `model` are optional so hand-written files still work), and calculates the output path.
 - `__main__.py`: runs the CLI with `python -m doc_categoriser`. The web interface starts `run` this way.
 - `cli.py`: `extract` creates the OCR engine from `--ocr-engine` (exit code 2 if it is unavailable), finds the files, runs `extract_document` on each, writes the JSON, prints a summary. `name` checks the arguments (folder, model file, `--max-document-tokens` of 1 or more) before it loads the model, reports a model that cannot load as an argument error, then suggests a name for each `.json` file, makes the names unique in each folder, and prints a summary. `rename` renames the source of each `.json` file to `<folder>-<suggested name>` (or only reports with `--dry-run`), fails a document whose new name another document of the run already gets in the same folder, and prints a summary. `run` runs the three stages in one process. `web` starts the web interface. In all commands, a failure on one file does not stop the run.
 
@@ -86,7 +95,7 @@ cli.py ──> deletes <work_dir>/extracted and <work_dir>/named, then <work_dir
 
 ### Stage JSON deleted after `run`
 
-- After the rename, the JSON files have no use. The extracted JSON holds the full text of financial documents, and a copy of it on disk is not necessary. The name suggestion JSON holds the old path and the new name of each document. The log of `run` (`Renamed: ... -> ...`) gives the same record. A new run of the folder extracts and names again, so no file is used again.
+- After the rename, the JSON files have no use. The extracted JSON holds the full text of financial documents, and a copy of it on disk is not necessary. The name suggestion JSON holds the old path and the new name of each document. The rename history in the document folder and the log of `run` (`Renamed: ... -> ...`) give the same record. No stage JSON is used again by a later run.
 - They are deleted also when some documents failed, for the same reason.
 - `work_dir` is deleted only if it is empty after that. The operator can give a folder that holds other files, and `run` must not delete them.
 - A cancelled run keeps them. The process stops before the delete.

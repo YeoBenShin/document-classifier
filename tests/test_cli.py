@@ -1,5 +1,6 @@
 """Behaviour of the `doc-categoriser extract` and `name` commands, run as an operator runs them."""
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -312,8 +313,10 @@ def run_rename(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def write_suggestion(named_dir: Path, relative_json_path: str, source_path: Path, suggested_name: str) -> None:
-    """Write a name suggestion JSON file as `doc-categoriser name` writes it."""
+def write_suggestion(
+    named_dir: Path, relative_json_path: str, source_path: Path, suggested_name: str, **run_settings: str | None
+) -> None:
+    """Write a name suggestion JSON file as `doc-categoriser name` writes it. `run_settings`: `method`, `ocr_engine`, `model`."""
     destination = named_dir / relative_json_path
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -323,15 +326,90 @@ def write_suggestion(named_dir: Path, relative_json_path: str, source_path: Path
                 "suggested_name": suggested_name,
                 "document_date": None,
                 "reason": "test",
+                **run_settings,
             }
         ),
         encoding="utf-8",
     )
 
 
+HISTORY_FILE_NAME = ".doc-categoriser-renames.jsonl"
+
+
+def read_history_lines(folder: Path) -> list[dict[str, object]]:
+    """Return the records of the rename history file of `folder`, in file order."""
+    return [json.loads(line) for line in (folder / HISTORY_FILE_NAME).read_text(encoding="utf-8").splitlines()]
+
+
+def write_history_lines(folder: Path, records: list[dict[str, object]]) -> None:
+    """Write `records` as the rename history file of `folder`."""
+    (folder / HISTORY_FILE_NAME).write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+
+
+def test_rename_adds_one_history_line_for_each_rename_in_the_folder_of_the_document(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    (input_dir / "2026").mkdir(parents=True)
+    (input_dir / "scan_0001.pdf").write_bytes(b"statement")
+    (input_dir / "2026" / "IMG_1.png").write_bytes(b"invoice")
+    named_dir = tmp_path / "named"
+    write_suggestion(
+        named_dir, "scan_0001.pdf.json", input_dir / "scan_0001.pdf", "2026-03-31-Statement.pdf",
+        method="text_layer", ocr_engine=None, model="model-a.gguf",
+    )
+    write_suggestion(
+        named_dir, "2026/IMG_1.png.json", input_dir / "2026" / "IMG_1.png", "2026-04-12-Invoice.png",
+        method="ocr", ocr_engine="apple-vision", model="model-a.gguf",
+    )
+
+    result = run_rename(named_dir)
+
+    assert result.returncode == 0, result.stderr
+    [statement_record] = read_history_lines(input_dir)
+    [invoice_record] = read_history_lines(input_dir / "2026")
+    assert {key: value for key, value in statement_record.items() if key != "renamed_at"} == {
+        "original_name": "scan_0001.pdf",
+        "new_name": "inbox-2026-03-31-Statement.pdf",
+        "sha256": hashlib.sha256(b"statement").hexdigest(),
+        "method": "text_layer",
+        "ocr_engine": None,
+        "model": "model-a.gguf",
+    }
+    assert {key: value for key, value in invoice_record.items() if key != "renamed_at"} == {
+        "original_name": "IMG_1.png",
+        "new_name": "2026-2026-04-12-Invoice.png",
+        "sha256": hashlib.sha256(b"invoice").hexdigest(),
+        "method": "ocr",
+        "ocr_engine": "apple-vision",
+        "model": "model-a.gguf",
+    }
+    assert str(statement_record["renamed_at"])[:4].isdigit() and "T" in str(statement_record["renamed_at"])
+
+
+def test_rename_again_adds_no_history_line_and_dry_run_writes_no_history(tmp_path: Path) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    (input_dir / "scan_0001.pdf").write_bytes(b"statement")
+    named_dir = tmp_path / "named"
+    write_suggestion(
+        named_dir, "scan_0001.pdf.json", input_dir / "scan_0001.pdf", "2026-03-31-Statement.pdf",
+        method="text_layer", ocr_engine=None, model="model-a.gguf",
+    )
+
+    assert run_rename(named_dir, "--dry-run").returncode == 0
+    assert not (input_dir / HISTORY_FILE_NAME).exists()
+    assert run_rename(named_dir).returncode == 0
+    assert run_rename(named_dir).returncode == 0
+
+    assert len(read_history_lines(input_dir)) == 1
+
+
 def file_names(folder: Path) -> list[str]:
-    """Return the sorted relative paths, with `/`, of all files under `folder`."""
-    return sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
+    """Return the sorted relative paths, with `/`, of all non-hidden files under `folder`."""
+    return sorted(
+        path.relative_to(folder).as_posix()
+        for path in folder.rglob("*")
+        if path.is_file() and not path.name.startswith(".")
+    )
 
 
 def test_extract_name_and_rename_give_each_document_its_suggested_name(
@@ -585,4 +663,153 @@ def test_run_rejects_incorrect_arguments_before_it_changes_anything(
 
     assert result.returncode == 2
     assert expected_message in result.stderr
+    assert not (tmp_path / "work").exists()
+
+
+def test_run_again_leaves_out_the_documents_its_rename_history_shows_as_done(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_text_pdf("statement.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "statement.pdf")
+    assert run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path).returncode == 0
+    [new_name] = file_names(input_dir)
+    [record] = read_history_lines(input_dir)
+    assert (record["original_name"], record["new_name"]) == ("statement.pdf", new_name)
+    assert (record["method"], record["ocr_engine"], record["model"]) == ("text_layer", None, test_model_path.name)
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert f"Already renamed (rename history): {new_name}" in result.stdout
+    assert "To process 0, already renamed 1" in result.stdout
+    assert "Extracted 0, skipped 0, failed 0" in result.stdout
+    assert file_names(input_dir) == [new_name]
+    assert len(read_history_lines(input_dir)) == 1
+
+
+def test_run_creates_an_empty_rename_history_in_each_folder_with_files(
+    tmp_path: Path, test_model_path: Path
+) -> None:
+    input_dir = tmp_path / "inbox"
+    (input_dir / "2026").mkdir(parents=True)
+    (input_dir / "notes.txt").write_text("not a document", encoding="utf-8")
+    (input_dir / "2026" / "notes.txt").write_text("not a document", encoding="utf-8")
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert (input_dir / HISTORY_FILE_NAME).read_text(encoding="utf-8") == ""
+    assert (input_dir / "2026" / HISTORY_FILE_NAME).read_text(encoding="utf-8") == ""
+
+
+def file_sha256(path: Path) -> str:
+    """Return the SHA-256 of the content of `path`, as lowercase hex."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def history_record(path: Path, **fields: object) -> dict[str, object]:
+    """Return a history record for the file at `path` with its SHA-256. `fields` replace the default values."""
+    return {
+        "original_name": "x.pdf",
+        "new_name": path.name,
+        "sha256": file_sha256(path),
+        "renamed_at": "2026-01-01T00:00:00+00:00",
+        "method": "text_layer",
+        "ocr_engine": None,
+        "model": "model.gguf",
+        **fields,
+    }
+
+
+def test_run_matches_documents_to_the_history_by_content_not_by_name(
+    tmp_path: Path,
+    test_model_path: Path,
+    make_text_pdf: Callable[[str, list[PageLines]], Path],
+    make_image: Callable[[str, PageLines], Path],
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    statement_lines = ["DBS Bank Statement", "Closing balance 980.40"]
+    make_text_pdf("a.pdf", [statement_lines]).rename(input_dir / "renamed-by-hand.pdf")
+    make_text_pdf("b.pdf", [statement_lines + ["Account 2"]]).rename(input_dir / "other-model.pdf")
+    make_image("c.png", ["TAX INVOICE", "Amount due 312.50"]).rename(input_dir / "other-ocr.png")
+    make_text_pdf("d.pdf", [statement_lines + ["Account 4"]]).rename(input_dir / "not-in-history.pdf")
+    make_text_pdf("e.pdf", [statement_lines + ["Account 5"]]).rename(input_dir / "same-name-new-content.pdf")
+    other_ocr_engine = "windows" if sys.platform == "darwin" else "apple-vision"
+    model = test_model_path.name
+    write_history_lines(
+        input_dir,
+        [
+            history_record(
+                input_dir / "renamed-by-hand.pdf", new_name="inbox-old-name.pdf", model=model, ocr_engine=other_ocr_engine
+            ),
+            history_record(input_dir / "other-model.pdf", model="other.gguf"),
+            history_record(input_dir / "other-ocr.png", method="ocr", ocr_engine=other_ocr_engine, model=model),
+            history_record(input_dir / "same-name-new-content.pdf", sha256="0" * 64, model=model),
+        ],
+    )
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Already renamed (rename history): renamed-by-hand.pdf" in result.stdout
+    assert "To process 4, already renamed 1" in result.stdout
+    for processed_name in ["other-model.pdf", "other-ocr.png", "not-in-history.pdf", "same-name-new-content.pdf"]:
+        assert f"Extracted: {processed_name}" in result.stdout
+    assert "renamed-by-hand.pdf" in file_names(input_dir)
+    records = read_history_lines(input_dir)
+    assert [record["new_name"] for record in records[:3]] == ["inbox-old-name.pdf", "other-model.pdf", "other-ocr.png"]
+    assert sorted(str(record["original_name"]) for record in records[3:]) == sorted(
+        ["other-model.pdf", "other-ocr.png", "not-in-history.pdf", "same-name-new-content.pdf"]
+    )
+    assert all(record["model"] == model for record in records[3:])
+
+
+def test_run_removes_history_lines_that_match_no_file_of_the_folder(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_text_pdf("a.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "kept.pdf")
+    kept_record = history_record(input_dir / "kept.pdf", model=test_model_path.name)
+    deleted_record = history_record(input_dir / "kept.pdf", new_name="deleted.pdf", sha256="0" * 64)
+    (input_dir / HISTORY_FILE_NAME).write_text(
+        json.dumps(deleted_record) + "\n{not json\n" + json.dumps(kept_record) + "\n", encoding="utf-8"
+    )
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "Removed from rename history (no file with this content): deleted.pdf" in result.stdout
+    assert "Already renamed (rename history): kept.pdf" in result.stdout
+    assert read_history_lines(input_dir) == [kept_record]
+
+
+def test_run_stops_before_any_change_when_two_documents_of_a_folder_have_the_same_content(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    (input_dir / "2026").mkdir(parents=True)
+    statement = make_text_pdf("a.pdf", [["DBS Bank Statement", "Closing balance 980.40"]])
+    (input_dir / "statement.pdf").write_bytes(statement.read_bytes())
+    (input_dir / "statement copy.pdf").write_bytes(statement.read_bytes())
+    (input_dir / "2026" / "statement.pdf").write_bytes(statement.read_bytes())
+    (input_dir / "notes.txt").write_text("same", encoding="utf-8")
+    (input_dir / "notes copy.txt").write_text("same", encoding="utf-8")
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+
+    assert result.returncode == 3
+    assert (
+        "Duplicate: these files in one folder have the same content: statement copy.pdf, statement.pdf" in result.stderr
+    )
+    assert "2026" not in result.stderr
+    assert "notes" not in result.stderr
+    assert "Stopped: no file was changed." in result.stderr
+    assert "== Stage 1" not in result.stdout
+    assert file_names(input_dir) == sorted(
+        ["2026/statement.pdf", "notes copy.txt", "notes.txt", "statement copy.pdf", "statement.pdf"]
+    )
+    assert not (input_dir / HISTORY_FILE_NAME).exists()
     assert not (tmp_path / "work").exists()

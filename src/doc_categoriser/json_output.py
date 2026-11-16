@@ -1,6 +1,7 @@
 """Reads and writes the JSON files that pass documents between the extraction, naming and renaming stages."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,10 +11,11 @@ from doc_categoriser.classification.naming import NameSuggestion
 
 
 def document_to_json_dict(document: ExtractedDocument) -> dict[str, Any]:
-    """Return the JSON-ready form of `document`: absolute source path, file type and pages."""
+    """Return the JSON-ready form of `document`: absolute source path, file type, OCR engine and pages."""
     return {
         "source_path": str(document.source_path.resolve()),
         "file_type": document.source_path.suffix.lower().removeprefix("."),
+        "ocr_engine": document.ocr_engine,
         "pages": [
             {"page_number": page.page_number, "text": page.text, "method": page.method.value}
             for page in document.pages
@@ -43,15 +45,38 @@ def read_document_json(path: Path) -> ExtractedDocument:
                 PageText(page_number=page["page_number"], text=page["text"], method=ExtractionMethod(page["method"]))
                 for page in content["pages"]
             ],
+            ocr_engine=content.get("ocr_engine"),
         )
     except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, ValueError) as error:
         raise NamingError("the file is not an extracted document JSON file") from error
 
 
-def write_name_suggestion_json(source_path: Path, suggestion: NameSuggestion, destination: Path) -> None:
+@dataclass(frozen=True)
+class NameSuggestionFile:
     """
-    Write the source path, suggested name, document date (YYYY-MM-DD or null) and reason as UTF-8 JSON to `destination`,
-    creating parent folders if necessary.
+    The content of a name suggestion JSON file that the renaming stage uses.
+    `method`, `ocr_engine` and `model` are None if the file does not give them.
+    """
+
+    source_path: Path
+    suggested_name: str
+    method: str | None
+    ocr_engine: str | None
+    model: str | None
+
+
+def write_name_suggestion_json(
+    source_path: Path,
+    suggestion: NameSuggestion,
+    destination: Path,
+    *,
+    method: str | None,
+    ocr_engine: str | None,
+    model: str | None,
+) -> None:
+    """
+    Write the source path, suggested name, document date (YYYY-MM-DD or null), reason, extraction method
+    (`ocr` or `text_layer`), OCR engine and model file name as UTF-8 JSON to `destination`, creating parent folders if necessary.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     content = {
@@ -59,20 +84,29 @@ def write_name_suggestion_json(source_path: Path, suggestion: NameSuggestion, de
         "suggested_name": suggestion.name,
         "document_date": suggestion.document_date.isoformat() if suggestion.document_date else None,
         "reason": suggestion.reason,
+        "method": method,
+        "ocr_engine": ocr_engine,
+        "model": model,
     }
     destination.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def read_name_suggestion_json(path: Path) -> tuple[Path, str]:
+def read_name_suggestion_json(path: Path) -> NameSuggestionFile:
     """
-    Return the source path and the suggested name in a JSON file written by `write_name_suggestion_json`.
+    Return the content of a JSON file written by `write_name_suggestion_json`. `method`, `ocr_engine` and `model` are optional.
     Raise RenamingError if it is not one.
     """
     try:
         content = json.loads(path.read_text(encoding="utf-8"))
         source_path, suggested_name = content["source_path"], content["suggested_name"]
-    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError) as error:
+        optional_values = [content.get(key) for key in ("method", "ocr_engine", "model")]
+    except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError, AttributeError) as error:
         raise RenamingError("the file is not a name suggestion JSON file") from error
-    if not isinstance(source_path, str) or not isinstance(suggested_name, str):
+    if (
+        not isinstance(source_path, str)
+        or not isinstance(suggested_name, str)
+        or not all(value is None or isinstance(value, str) for value in optional_values)
+    ):
         raise RenamingError("the file is not a name suggestion JSON file")
-    return Path(source_path), suggested_name
+    method, ocr_engine, model = optional_values
+    return NameSuggestionFile(Path(source_path), suggested_name, method, ocr_engine, model)

@@ -31,7 +31,26 @@ from doc_categoriser.json_output import (
     write_name_suggestion_json,
 )
 from doc_categoriser.extraction.ocr import OcrEngineName, create_ocr_engine, native_ocr_engine_name
-from doc_categoriser.renaming import RenameOutcome, name_with_folder, rename_document
+from doc_categoriser.models import ExtractedDocument, ExtractionMethod
+from doc_categoriser.renaming import (
+    OCR_METHOD,
+    TEXT_LAYER_METHOD,
+    RenameOutcome,
+    RenameRecord,
+    append_history,
+    current_time_text,
+    ensure_history_file,
+    file_sha256,
+    is_done,
+    last_record_by_hash,
+    name_with_folder,
+    read_history,
+    rename_document,
+    write_history,
+)
+
+DUPLICATE_DOCUMENTS_EXIT_CODE = 3
+"""Exit code of `run` when two or more documents in one folder have the same content. The run stops before any change."""
 
 
 def positive_integer(text: str) -> int:
@@ -150,15 +169,19 @@ def find_source_files(input_dir: Path, excluded_dir: Path | None = None) -> list
 
 
 def run_extract(
-    input_dir: Path, output_dir: Path, extractors: list[DocumentExtractor], excluded_dir: Path | None = None
+    input_dir: Path,
+    output_dir: Path,
+    extractors: list[DocumentExtractor],
+    ocr_engine: str,
+    source_files: list[Path] | None = None,
 ) -> int:
     """
-    Extract every file under `input_dir`, except the files under `excluded_dir`, into JSON files under `output_dir`.
-    Unsupported files are skipped. A file that fails is reported and the run continues.
-    Return 1 if any file failed, otherwise 0.
+    Extract each file of `source_files` (default: every file under `input_dir`) into JSON files under `output_dir`.
+    Each JSON file records `ocr_engine` as the OCR engine. Unsupported files are skipped.
+    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
     """
     extracted_count = skipped_count = failed_count = 0
-    for source_path in find_source_files(input_dir, excluded_dir):
+    for source_path in find_source_files(input_dir) if source_files is None else source_files:
         display_name = source_path.relative_to(input_dir)
         try:
             document = extract_document(source_path, extractors)
@@ -174,16 +197,24 @@ def run_extract(
             print(f"Failed: {display_name}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
             failed_count += 1
             continue
-        write_document_json(document, output_path_for(source_path, input_dir, output_dir))
+        write_document_json(replace(document, ocr_engine=ocr_engine), output_path_for(source_path, input_dir, output_dir))
         print(f"Extracted: {display_name}", flush=True)
         extracted_count += 1
     print(f"Extracted {extracted_count}, skipped {skipped_count}, failed {failed_count}", flush=True)
     return 1 if failed_count else 0
 
 
-def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer) -> int:
+def extraction_method(document: ExtractedDocument) -> str:
+    """Return `ocr` if the text of one or more pages of `document` came from OCR, otherwise `text_layer`."""
+    if any(page.method is ExtractionMethod.OCR for page in document.pages):
+        return OCR_METHOD
+    return TEXT_LAYER_METHOD
+
+
+def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer, model_name: str) -> int:
     """
     Suggest a name for every `.json` file under `input_dir` and write one name suggestion JSON file for each under `output_dir`.
+    Each name suggestion JSON file records the extraction method, the OCR engine (only for the `ocr` method) and `model_name`.
     Documents from the same folder never get the same name. A file that fails is reported and the run continues.
     Return 1 if any file failed, otherwise 0.
     """
@@ -204,7 +235,15 @@ def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer) -> int:
             continue
         names_in_use = names_in_use_by_folder.setdefault(display_name.parent, set())
         suggestion = replace(suggestion, name=unique_name(suggestion.name, names_in_use))
-        write_name_suggestion_json(document.source_path, suggestion, output_dir / display_name)
+        method = extraction_method(document)
+        write_name_suggestion_json(
+            document.source_path,
+            suggestion,
+            output_dir / display_name,
+            method=method,
+            ocr_engine=document.ocr_engine if method == OCR_METHOD else None,
+            model=model_name,
+        )
         print(f"Named: {display_name} -> {suggestion.name}", flush=True)
         named_count += 1
     print(f"Named {named_count}, failed {failed_count}", flush=True)
@@ -215,6 +254,8 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
     """
     Rename the source document of every `.json` file under `input_dir` to `<folder>-<suggested name>`, in the folder where it is.
     With `dry_run`, change no file. No file is overwritten, and no two documents get the same new name in one folder.
+    Each rename adds a line to the rename history of the folder, with the SHA-256 of the file. A document found already renamed
+    adds a line only if the last line for its SHA-256 has another new name, method, OCR engine or model. With `dry_run`, no line is added.
     A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
     """
     renamed_label = "Would rename" if dry_run else "Renamed"
@@ -223,8 +264,9 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
     for json_path in (path for path in find_source_files(input_dir) if path.suffix.lower() == ".json"):
         display_name = json_path.relative_to(input_dir)
         try:
-            source_path, suggested_name = read_name_suggestion_json(json_path)
-            new_name = name_with_folder(source_path, suggested_name)
+            suggestion = read_name_suggestion_json(json_path)
+            source_path = suggestion.source_path
+            new_name = name_with_folder(source_path, suggestion.suggested_name)
             new_name_key = (source_path.parent, new_name.lower())
             if new_name_key in new_names_in_use:
                 raise RenamingError(f"another document already gets the name {new_name} in {source_path.parent}")
@@ -238,6 +280,20 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
             failed_count += 1
             continue
         new_names_in_use.add(new_name_key)
+        if not dry_run:
+            record = RenameRecord(
+                original_name=source_path.name,
+                new_name=new_name,
+                sha256=file_sha256(source_path.with_name(new_name)),
+                renamed_at=current_time_text(),
+                method=suggestion.method,
+                ocr_engine=suggestion.ocr_engine,
+                model=suggestion.model,
+            )
+            records, _ = read_history(source_path.parent)
+            last_record = last_record_by_hash(records).get(record.sha256)
+            if outcome is RenameOutcome.RENAMED or not _same_result(last_record, record):
+                append_history(source_path.parent, record)
         if outcome is RenameOutcome.ALREADY_RENAMED:
             print(f"Already renamed: {display_name}: {new_name}", flush=True)
             already_renamed_count += 1
@@ -248,21 +304,121 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
     return 1 if failed_count else 0
 
 
-def run_pipeline(input_dir: Path, work_dir: Path, extractors: list[DocumentExtractor], namer: DocumentNamer) -> int:
+def _same_result(last_record: RenameRecord | None, record: RenameRecord) -> bool:
+    """Return True if `last_record` exists and has the new name, method, OCR engine and model of `record`."""
+    return last_record is not None and (
+        last_record.new_name,
+        last_record.method,
+        last_record.ocr_engine,
+        last_record.model,
+    ) == (record.new_name, record.method, record.ocr_engine, record.model)
+
+
+def hash_documents(source_files: list[Path], supported_suffixes: set[str]) -> dict[Path, str]:
     """
-    Run extraction into `<work_dir>/extracted`, naming into `<work_dir>/named`, then renaming, one stage after the other.
-    When the renaming stage has finished, `<work_dir>/extracted` and `<work_dir>/named` are deleted, then `work_dir` if it is empty.
-    Files under `work_dir` are not extracted. A failed document does not stop the run: the next stages use the documents
-    that did not fail. Return 1 if any document failed in any stage, otherwise 0.
+    Return the SHA-256 of each file of `source_files` whose lowercase suffix is in `supported_suffixes`.
+    A file that cannot be read is left out, so that extraction reports it.
     """
+    hashes: dict[Path, str] = {}
+    for source_path in source_files:
+        if source_path.suffix.lower() not in supported_suffixes:
+            continue
+        try:
+            hashes[source_path] = file_sha256(source_path)
+        except OSError:
+            continue
+    return hashes
+
+
+def report_duplicate_documents(input_dir: Path, hashes: dict[Path, str]) -> bool:
+    """
+    Print on stderr each group of two or more files in one folder with the same SHA-256 in `hashes`.
+    Return True if there is one or more groups.
+    """
+    groups: dict[tuple[Path, str], list[Path]] = {}
+    for source_path, sha256 in hashes.items():
+        groups.setdefault((source_path.parent, sha256), []).append(source_path)
+    duplicate_groups = [sorted(paths) for paths in groups.values() if len(paths) > 1]
+    for paths in sorted(duplicate_groups):
+        names = ", ".join(str(path.relative_to(input_dir)) for path in paths)
+        print(f"Duplicate: these files in one folder have the same content: {names}", file=sys.stderr, flush=True)
+    if duplicate_groups:
+        print(
+            "Stopped: no file was changed. Remove or move the duplicate files, then run again.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return bool(duplicate_groups)
+
+
+def select_files_to_process(
+    input_dir: Path, source_files: list[Path], hashes: dict[Path, str], ocr_engine: str, model_name: str
+) -> list[Path]:
+    """
+    Return the files of `source_files` that the rename history does not show as done with `model_name` and `ocr_engine`
+    (see renaming.is_done). A file is matched to the last history line with its SHA-256 in `hashes`; its name is not used.
+    In each folder that holds a file: create an empty history file if there is none, and remove the history lines
+    whose SHA-256 matches no file of the folder (also the lines that are not records).
+    Print each removed line, each file that is left out, and a summary.
+    """
+    last_records: dict[Path, dict[str, RenameRecord]] = {}
+    for folder in sorted({path.parent for path in source_files}):
+        ensure_history_file(folder)
+        records, invalid_count = read_history(folder)
+        folder_hashes = {sha256 for path, sha256 in hashes.items() if path.parent == folder}
+        kept_records = [record for record in records if record.sha256 in folder_hashes]
+        for record in records:
+            if record.sha256 not in folder_hashes:
+                print(
+                    f"Removed from rename history (no file with this content): {(folder / record.new_name).relative_to(input_dir)}",
+                    flush=True,
+                )
+        if len(kept_records) < len(records) or invalid_count:
+            write_history(folder, kept_records)
+        last_records[folder] = last_record_by_hash(kept_records)
+    selected: list[Path] = []
+    for source_path in source_files:
+        sha256 = hashes.get(source_path)
+        record = last_records[source_path.parent].get(sha256) if sha256 else None
+        if is_done(record, model_name, ocr_engine):
+            print(f"Already renamed (rename history): {source_path.relative_to(input_dir)}", flush=True)
+        else:
+            selected.append(source_path)
+    print(f"To process {len(selected)}, already renamed {len(source_files) - len(selected)}", flush=True)
+    return selected
+
+
+def run_pipeline(
+    input_dir: Path,
+    work_dir: Path,
+    extractors: list[DocumentExtractor],
+    ocr_engine: str,
+    namer: DocumentNamer,
+    model_name: str,
+) -> int:
+    """
+    Hash the documents and check the rename history of each folder, then run extraction into `<work_dir>/extracted`, naming into `<work_dir>/named`,
+    then renaming, one stage after the other. A file that the rename history shows as done with `model_name` and `ocr_engine`
+    is left out. If two or more documents in one folder have the same content, stop before any change and return
+    DUPLICATE_DOCUMENTS_EXIT_CODE. When the renaming stage has finished, `<work_dir>/extracted` and `<work_dir>/named` are deleted, then
+    `work_dir` if it is empty. Files under `work_dir` are not extracted. A failed document does not stop the run:
+    the next stages use the documents that did not fail. Return 1 if any document failed in any stage, otherwise 0.
+    """
+    print(f"== Rename history: {input_dir.resolve()} (model {model_name}, OCR engine {ocr_engine})", flush=True)
+    all_source_files = find_source_files(input_dir, work_dir)
+    supported_suffixes = {suffix for extractor in extractors for suffix in extractor.supported_suffixes}
+    hashes = hash_documents(all_source_files, supported_suffixes)
+    if report_duplicate_documents(input_dir, hashes):
+        return DUPLICATE_DOCUMENTS_EXIT_CODE
     extracted_dir = work_dir / "extracted"
     named_dir = work_dir / "named"
     extracted_dir.mkdir(parents=True, exist_ok=True)
     named_dir.mkdir(parents=True, exist_ok=True)
+    source_files = select_files_to_process(input_dir, all_source_files, hashes, ocr_engine, model_name)
     print(f"== Stage 1 of 3: Extraction: {input_dir.resolve()} -> {extracted_dir.resolve()}", flush=True)
-    extract_status = run_extract(input_dir, extracted_dir, extractors, excluded_dir=work_dir)
+    extract_status = run_extract(input_dir, extracted_dir, extractors, ocr_engine, source_files)
     print(f"== Stage 2 of 3: Naming: {extracted_dir.resolve()} -> {named_dir.resolve()}", flush=True)
-    name_status = run_name(extracted_dir, named_dir, namer)
+    name_status = run_name(extracted_dir, named_dir, namer, model_name)
     print(f"== Stage 3 of 3: Renaming: {named_dir.resolve()}", flush=True)
     rename_status = run_rename(named_dir, dry_run=False)
     shutil.rmtree(extracted_dir)
@@ -274,13 +430,19 @@ def run_pipeline(input_dir: Path, work_dir: Path, extractors: list[DocumentExtra
     return max(extract_status, name_status, rename_status)
 
 
-def create_extractors_or_exit(parser: argparse.ArgumentParser, engine_option: str | None) -> list[DocumentExtractor]:
-    """Return the default extractors with the OCR engine of `engine_option`. Exit with code 2 if the engine is unavailable."""
+def create_extractors_or_exit(
+    parser: argparse.ArgumentParser, engine_option: str | None
+) -> tuple[str, list[DocumentExtractor]]:
+    """
+    Return the name of the OCR engine of `engine_option` (default: the engine of this operating system) and the default
+    extractors with that engine. Exit with code 2 if the engine is unavailable.
+    """
     try:
-        ocr_engine = create_ocr_engine(OcrEngineName(engine_option) if engine_option else native_ocr_engine_name())
+        engine_name = OcrEngineName(engine_option) if engine_option else native_ocr_engine_name()
+        ocr_engine = create_ocr_engine(engine_name)
     except OcrEngineUnavailableError as error:
         parser.error(str(error))
-    return default_extractors(ocr_engine)
+    return engine_name.value, default_extractors(ocr_engine)
 
 
 def load_namer_or_exit(parser: argparse.ArgumentParser, model_path: Path, max_document_tokens: int) -> LlamaCppNamer:
@@ -300,8 +462,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not arguments.input_dir.is_dir():
         parser.error(f"{arguments.input_dir} is not a folder")
     if arguments.command == "extract":
-        extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
-        return run_extract(arguments.input_dir, arguments.output_dir, extractors)
+        engine_name, extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
+        return run_extract(arguments.input_dir, arguments.output_dir, extractors, engine_name)
     if arguments.command == "rename":
         return run_rename(arguments.input_dir, arguments.dry_run)
     if arguments.command == "web":
@@ -316,8 +478,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             open_browser=not arguments.no_browser,
         )
     if arguments.command == "run":
-        extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
+        engine_name, extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
         namer = load_namer_or_exit(parser, arguments.model, arguments.max_document_tokens)
-        return run_pipeline(arguments.input_dir, arguments.work_dir, extractors, namer)
+        return run_pipeline(
+            arguments.input_dir, arguments.work_dir, extractors, engine_name, namer, arguments.model.name
+        )
     namer = load_namer_or_exit(parser, arguments.model, arguments.max_document_tokens)
-    return run_name(arguments.input_dir, arguments.output_dir, namer)
+    return run_name(arguments.input_dir, arguments.output_dir, namer, arguments.model.name)

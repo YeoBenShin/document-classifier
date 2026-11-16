@@ -60,6 +60,7 @@ Output file:
 {
   "source_path": "/abs/path/inbox/statement.pdf",
   "file_type": "pdf",
+  "ocr_engine": "apple-vision",
   "pages": [
     {"page_number": 1, "text": "DBS Bank Statement\n...", "method": "text_layer"},
     {"page_number": 2, "text": "...", "method": "ocr"}
@@ -67,7 +68,7 @@ Output file:
 }
 ```
 
-`method` is `text_layer` (text read from the PDF) or `ocr` (text recognised from the page image).
+`method` is `text_layer` (text read from the PDF) or `ocr` (text recognised from the page image). `ocr_engine` is the engine of the run (`--ocr-engine`).
 
 ### name
 
@@ -89,9 +90,14 @@ Output file:
   "source_path": "/abs/path/inbox/statement.pdf",
   "suggested_name": "2026-03-31-DBS-Bank-Statement.pdf",
   "document_date": "2026-03-31",
-  "reason": "The document is a bank statement from DBS covering March 2026."
+  "reason": "The document is a bank statement from DBS covering March 2026.",
+  "method": "text_layer",
+  "ocr_engine": null,
+  "model": "Qwen3.5-4B-Q4_K_M.gguf"
 }
 ```
+
+`method` is `ocr` if the text of one or more pages came from OCR, otherwise `text_layer`. `ocr_engine` is given only for `ocr`. `model` is the file name of the GGUF model.
 
 ### rename
 
@@ -100,6 +106,7 @@ Output file:
 - A file is never overwritten. If a different file already has the name, or two documents of one folder get the same name, the document is reported as failed and is not renamed.
 - The suggested name must be one file name (no `/`, `\`, `..`) with the same extension as the source. Otherwise the document fails. The JSON files can be edited by hand before the rename.
 - Safe to run again: a document that already has its new name is reported as `Already renamed`.
+- Each rename adds one line to the rename history of the folder of the document (see [Rename history](#rename-history)). A document reported as `Already renamed` adds a line only if the last line for its content has a different `new_name`, `method`, `ocr_engine` or `model`. `--dry-run` writes no line.
 - Exit code: `0` if no file failed, `1` if one or more files failed, `2` for incorrect arguments (missing folder).
 
 Output:
@@ -114,12 +121,38 @@ Renamed 1, already renamed 1, failed 1
 ### run
 
 - Runs `extract`, `name` and `rename` on `<input_dir>`, one after the other, in one process. The model is loaded once, before extraction.
+- Before extraction, calculates the SHA-256 of each document (supported file types only).
+- If two or more documents in one folder have the same content, the run stops before any change, with a `Duplicate: ...` line for each group and exit code `3`. Remove or move the copies, then run again.
+- Then, for each folder that holds a file (see [Rename history](#rename-history)):
+  - Creates an empty history file if there is none.
+  - Removes each history line whose `sha256` matches no file of the folder (`Removed from rename history (no file with this content): ...`), for example a deleted file or a changed file. Lines that are not valid records are also removed.
+- A file is left out (`Already renamed (rename history): ...`) if the last history line with its SHA-256 has the model of this run (file name of `--model`), and the method `text_layer`, or the method `ocr` with the OCR engine of this run. The file name is not used, so a file renamed by hand after its rename is left out and keeps its name. All other files go to extraction:
+  - a new file, or a file whose content changed,
+  - a file renamed with another model,
+  - a file renamed with OCR from another engine. A file renamed from its PDF text layer is not processed again for another engine.
 - Writes the extracted JSON to `<work_dir>/extracted/` and the name suggestion JSON to `<work_dir>/named/`. When the renaming stage has finished, both folders are deleted, then `<work_dir>` if it is empty. The log is the record of each rename. A cancelled run keeps them. Files under `<work_dir>` are not extracted, so `<work_dir>` can be inside `<input_dir>`.
 - Renames without a pause for review. Use the three separate commands to examine the names first.
 - Options: `--model` (required), `--ocr-engine`, `--max-document-tokens`, as for `extract` and `name`.
 - A failed document does not stop the run. The next stages use the documents that did not fail.
-- Output: a line `== Stage N of 3: ...` before each stage, then the output of that stage.
-- Exit code: `0` if no document failed, `1` if one or more documents failed in any stage, `2` for incorrect arguments (missing folder, missing or unloadable model file, unavailable OCR engine).
+- Output: a line `== Rename history: ...` with the files left out and a line `To process N, already renamed M`, then a line `== Stage N of 3: ...` before each stage, then the output of that stage.
+- Exit code: `0` if no document failed, `1` if one or more documents failed in any stage, `2` for incorrect arguments (missing folder, missing or unloadable model file, unavailable OCR engine), `3` if two or more documents in one folder have the same content (no change made).
+
+### Rename history
+
+Each folder with documents gets the hidden file `.doc-categoriser-renames.jsonl`. `rename` and `run` add one line for each rename:
+
+```json
+{"original_name": "scan_0001.pdf", "new_name": "inbox-2026-03-31-DBS-Bank-Statement.pdf", "sha256": "cff093de...", "renamed_at": "2026-11-16T12:11:18+08:00", "method": "text_layer", "ocr_engine": null, "model": "Qwen3.5-4B-Q4_K_M.gguf"}
+```
+
+- `original_name`: the name before this rename. `new_name`: the name after it. These two are a log only. `run` does not use them.
+- `sha256`: the SHA-256 of the file content (64 lowercase hex characters). A rename does not change the content. `run` finds a file in the history with this value.
+- `renamed_at`: local date and time with the UTC offset.
+- `method`: `ocr` or `text_layer`. `ocr_engine`: the OCR engine, only for `ocr`. `model`: the file name of the GGUF model. Each is `null` if the name suggestion JSON did not give it.
+- `rename` and `run` add lines at the end. For one `sha256`, the last line is used.
+- `run` removes the lines whose `sha256` matches no file of the folder, and the lines that are not valid records (each one is reported).
+- Delete a line (or the file) to make `run` process the documents again.
+- Hidden files are not documents, so no stage reads the history file as a document.
 
 ### web
 
@@ -133,11 +166,11 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
   - Browse folders (click a name to open it, `Up` for the parent, or type a path). Select one or more folders with the checkboxes, then `Add to queue`.
   - Each queued folder runs `doc-categoriser run` in a child process. One folder runs at a time, in queue order.
   - Click a folder in the queue to see its log, live.
-  - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: all documents are extracted and named again, and a document that already has its new name (`<folder>-<suggested name>`) is reported as `Already renamed`.
+  - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: the documents that the rename history shows as done are left out, and the others are extracted, named and renamed.
   - `Decisions folder`: each queued folder gets the subfolder `<folder name>-<date>-<time>-<job number>` here, with `extracted/` and `named/` (the rename decisions) during the run. The subfolder is deleted when the renaming has finished. A cancelled run keeps it. Default: `renaming-decision` in the current folder.
   - `Model file`: the GGUF file. Default: `models/Qwen3.5-4B-Q4_K_M.gguf` in the current folder.
 - Options: `--output-dir` and `--model` (the defaults shown in the interface), `--host` (default `127.0.0.1`), `--port` (default `8765`, `0` for a free port), `--no-browser`.
-- Status of a folder: `Queued`, `Running`, `Done` (exit code 0), `Done with errors` (exit code 1: some documents failed, see the log), `Failed` (other exit code, for example a model file that cannot load), `Cancelled`.
+- Status of a folder: `Queued`, `Running`, `Done` (exit code 0), `Done with errors` (exit code 1: some documents failed, see the log), `Failed` (other exit code, for example a model file that cannot load, or duplicate documents in one folder), `Cancelled`.
 - The queue and the logs are kept in memory only. They are lost when the server stops. The JSON files stay in the decisions folder.
 
 ## Moving parts
@@ -151,6 +184,7 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
 - `suggest_document_name(document, namer)`: gives the document text to a namer, then builds `YYYY-MM-DD-<name><extension>` as a safe file name.
 - `LlamaCppNamer`: runs the GGUF model in-process with llama-cpp-python. The answer is constrained to JSON with a name and a reason.
 - `name_with_folder(source_path, suggested_name)`: puts the folder name in front of the suggested name.
+- `renaming.history`: calculates the SHA-256 of a file, and reads, adds and removes lines of the rename history file of a folder. `is_done(record, model, ocr_engine)` decides if `run` leaves a file out.
 - `rename_document(source_path, new_name)`: checks the name, then renames the file in its folder. Never overwrites.
 - `doc-categoriser extract` / `name` / `rename`: run the three stages on a folder.
 - `doc-categoriser run`: runs the three stages on a folder in one process.
