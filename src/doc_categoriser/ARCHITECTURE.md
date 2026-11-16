@@ -49,7 +49,7 @@ cli.py ──> creates the OCR engine and loads the model (exit code 2 if either
 cli.py ──> run_extract(input_dir, <work_dir>/extracted, files under work_dir excluded)
 cli.py ──> run_name(<work_dir>/extracted, <work_dir>/named)
 cli.py ──> run_rename(<work_dir>/named)
-cli.py ──> deletes <work_dir>/extracted
+cli.py ──> deletes <work_dir>/extracted and <work_dir>/named, then <work_dir> if empty
            exit code: the highest exit code of the three stages
 ```
 
@@ -84,10 +84,12 @@ cli.py ──> deletes <work_dir>/extracted
 
 - The default decisions folder of the web interface is in the folder where the interface starts, and an operator can queue that folder or a parent of it. Without the exclusion, `run` would extract its own JSON files (and those of earlier runs in the same work folder).
 
-### Extracted JSON deleted after `run`
+### Stage JSON deleted after `run`
 
-- After the rename, only the name suggestion JSON is useful: it records each decision. The extracted JSON holds the full text of financial documents, and a copy of it on disk is not necessary. A new run of the folder extracts again.
-- It is deleted also when some documents failed. A new run of the folder extracts all documents again, so the files are not used again.
+- After the rename, the JSON files have no use. The extracted JSON holds the full text of financial documents, and a copy of it on disk is not necessary. The name suggestion JSON holds the old path and the new name of each document. The log of `run` (`Renamed: ... -> ...`) gives the same record. A new run of the folder extracts and names again, so no file is used again.
+- They are deleted also when some documents failed, for the same reason.
+- `work_dir` is deleted only if it is empty after that. The operator can give a folder that holds other files, and `run` must not delete them.
+- A cancelled run keeps them. The process stops before the delete.
 
 ### Folder for each stage
 

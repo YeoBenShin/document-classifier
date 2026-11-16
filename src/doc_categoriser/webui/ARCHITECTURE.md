@@ -41,4 +41,4 @@ queue thread: waits for a queued job ──> subprocess.Popen(pipeline_command(j
 
 ### Logs in memory
 
-- The queue and the logs are kept in memory. They are for the operator to follow a run. The JSON files in the work folder are the lasting record of each decision.
+- The queue and the logs are kept in memory. They are for the operator to follow a run. `run` deletes the work folder at the end, so nothing lasting stays on disk. An operator who needs a record copies the log.

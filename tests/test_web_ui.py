@@ -288,6 +288,8 @@ def test_queued_folder_is_extracted_named_and_renamed_with_the_real_pipeline(
 
         log = web_ui.log(job["id"])
         assert web_ui.job(job["id"])["status"] == "succeeded", log
-        decision = json.loads((Path(job["work_dir"]) / "named" / "scan_0001.pdf.json").read_text(encoding="utf-8"))
-        assert [path.name for path in input_dir.iterdir()] == [f"inbox-{decision['suggested_name']}"]
+        [new_name] = [path.name for path in input_dir.iterdir()]
+        assert new_name.startswith("inbox-")
+        assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> {new_name}" in log
         assert "Renamed 1, already renamed 0, failed 0" in log
+        assert not Path(job["work_dir"]).exists()

@@ -99,7 +99,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     run_command.add_argument(
         "work_dir",
         type=Path,
-        help="Folder for the stage output: `extracted/` (extracted JSON) and `named/` (name suggestion JSON).",
+        help="Folder for the stage output during the run: `extracted/` (extracted JSON) and `named/` (name suggestion JSON). Deleted when the renaming has finished.",
     )
     add_ocr_engine_argument(run_command)
     add_model_arguments(run_command)
@@ -251,7 +251,8 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
 def run_pipeline(input_dir: Path, work_dir: Path, extractors: list[DocumentExtractor], namer: DocumentNamer) -> int:
     """
     Run extraction into `<work_dir>/extracted`, naming into `<work_dir>/named`, then renaming, one stage after the other.
-    When the renaming stage has finished, `<work_dir>/extracted` is deleted. Files under `work_dir` are not extracted. A failed document does not stop the run: the next stages use the documents
+    When the renaming stage has finished, `<work_dir>/extracted` and `<work_dir>/named` are deleted, then `work_dir` if it is empty.
+    Files under `work_dir` are not extracted. A failed document does not stop the run: the next stages use the documents
     that did not fail. Return 1 if any document failed in any stage, otherwise 0.
     """
     extracted_dir = work_dir / "extracted"
@@ -266,6 +267,10 @@ def run_pipeline(input_dir: Path, work_dir: Path, extractors: list[DocumentExtra
     rename_status = run_rename(named_dir, dry_run=False)
     shutil.rmtree(extracted_dir)
     print(f"Deleted the extracted JSON files: {extracted_dir.resolve()}", flush=True)
+    shutil.rmtree(named_dir)
+    print(f"Deleted the name suggestion JSON files: {named_dir.resolve()}", flush=True)
+    if not any(work_dir.iterdir()):
+        work_dir.rmdir()
     return max(extract_status, name_status, rename_status)
 
 

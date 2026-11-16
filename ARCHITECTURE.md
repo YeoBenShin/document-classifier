@@ -72,7 +72,7 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 
 - `run` joins the three stages, so the web interface starts one child process for each folder and only reads its output. The log in the interface is the same text that an operator sees in a terminal.
 - `run` renames without a pause for review. It is for folders where the operator accepts the model names. The three separate commands stay for a review before the rename.
-- `run` deletes its extracted JSON when the renaming stage has finished. See `src/doc_categoriser/ARCHITECTURE.md`.
+- `run` deletes its extracted JSON and name suggestion JSON when the renaming stage has finished. See `src/doc_categoriser/ARCHITECTURE.md`.
 - `run` loads the model before extraction. A model file that cannot load stops the run at once with exit code 2, before OCR (slow) and before any change.
 
 ### Web interface
@@ -82,7 +82,7 @@ The extracted JSON files are the contract between extraction and naming. Each fi
 - One folder runs at a time. Each run loads the model (2.7 GB), and two at a time would need twice the memory on a 16 GB laptop and be no faster on its CPU.
 - The server uses only the Python standard library (`http.server`). On the target laptop, each new third-party package needs approval. The page is one HTML file with plain JavaScript and no build step.
 - The page polls for the queue and the new log lines each second, instead of a push connection. It is simple, and the log of a long run needs no faster updates.
-- Each folder gets its own subfolder in the decisions folder, named with the folder name, the time and the job number. Two runs of one folder, or two folders with the same name, do not mix their JSON files.
+- Each folder gets its own subfolder in the decisions folder, named with the folder name, the time and the job number. Two runs of one folder, or two folders with the same name, do not mix their JSON files. The subfolder is deleted at the end of the run (see `run` above), and a cancelled run keeps it.
 - A cancelled run is not undone. Each rename is one file system operation, so a file has either its old name or its new name. Renames before the cancel are kept.
 - Protection against other web sites in the same browser: the server listens on `127.0.0.1` only, refuses a `Host` header that is not this computer (DNS rebinding), and accepts only `application/json` POST bodies (a form from another site cannot send JSON without a CORS preflight, which the server never allows).
 

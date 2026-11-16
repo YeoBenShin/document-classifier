@@ -490,7 +490,7 @@ def run_pipeline(*arguments: str | Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_run_extracts_names_and_renames_and_keeps_the_decisions_in_the_work_folder(
+def test_run_extracts_names_and_renames_then_deletes_its_work_folder(
     tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
 ) -> None:
     input_dir = tmp_path / "inbox"
@@ -504,10 +504,11 @@ def test_run_extracts_names_and_renames_and_keeps_the_decisions_in_the_work_fold
     result = run_pipeline(input_dir, work_dir, "--model", test_model_path)
 
     assert result.returncode == 0, result.stderr
-    decision = json.loads((work_dir / "named" / "scan_0001.pdf.json").read_text(encoding="utf-8"))
-    assert not (work_dir / "extracted").exists()
-    assert decision["source_path"] == str((input_dir / "scan_0001.pdf").resolve())
-    assert file_names(input_dir) == [f"inbox-{decision['suggested_name']}"]
+    assert not work_dir.exists()
+    assert (tmp_path / "renaming-decision").is_dir()
+    [new_name] = file_names(input_dir)
+    assert new_name.startswith("inbox-") and new_name.endswith(".pdf")
+    assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> {new_name}" in result.stdout
     stage_positions = [result.stdout.index(stage) for stage in ["Extraction", "Naming", "Renaming"]]
     assert stage_positions == sorted(stage_positions)
     assert "Extracted 1, skipped 0, failed 0" in result.stdout
@@ -527,7 +528,8 @@ def test_run_ignores_its_own_work_folder_inside_the_input_folder(
 
     assert result.returncode == 0, result.stderr
     assert "Extracted 1, skipped 0, failed 0" in result.stdout
-    assert sorted(path.name for path in (work_dir / "named").rglob("*.json")) == ["statement.pdf.json"]
+    assert "Named 1, failed 0" in result.stdout
+    assert not work_dir.exists()
 
 
 def test_run_reports_failed_documents_renames_the_others_and_exits_non_zero(
@@ -544,7 +546,23 @@ def test_run_reports_failed_documents_renames_the_others_and_exits_non_zero(
     assert "Failed: a_broken.pdf" in result.stderr
     assert "Renamed 1, already renamed 0, failed 0" in result.stdout
     assert "a_broken.pdf" in file_names(input_dir)
-    assert not (tmp_path / "work" / "extracted").exists()
+    assert not (tmp_path / "work").exists()
+
+
+def test_run_keeps_other_files_in_its_work_folder(
+    tmp_path: Path, test_model_path: Path, make_text_pdf: Callable[[str, list[PageLines]], Path]
+) -> None:
+    input_dir = tmp_path / "inbox"
+    input_dir.mkdir()
+    make_text_pdf("statement.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "statement.pdf")
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "notes.txt").write_text("keep", encoding="utf-8")
+
+    result = run_pipeline(input_dir, work_dir, "--model", test_model_path)
+
+    assert result.returncode == 0, result.stderr
+    assert sorted(path.name for path in work_dir.iterdir()) == ["notes.txt"]
 
 
 @pytest.mark.parametrize(
