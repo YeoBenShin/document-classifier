@@ -133,6 +133,7 @@ Renamed 1, already renamed 1, failed 1
 - Writes the extracted JSON to `<work_dir>/extracted/` and the name suggestion JSON to `<work_dir>/named/`. When the renaming stage has finished, both folders are deleted, then `<work_dir>` if it is empty. The log is the record of each rename. A cancelled run keeps them. Files under `<work_dir>` are not extracted, so `<work_dir>` can be inside `<input_dir>`.
 - Renames without a pause for review. Use the three separate commands to examine the names first.
 - Options: `--model` (required), `--ocr-engine`, `--max-document-tokens`, as for `extract` and `name`.
+- `--summary-file <file.json>`: at the end, writes the document counts of the run to this file. `processed`: documents that have their new name. `skipped_already_renamed`: documents left out by the rename history. `skipped_unsupported`: files of an unsupported type. `failed`: documents that failed in any stage. When the run stops for duplicate documents, `failed` is the number of duplicate files. A run that is stopped (cancel, exit code `2`) writes no file.
 - A failed document does not stop the run. The next stages use the documents that did not fail.
 - Output: a line `== Rename history: ...` with the files left out and a line `To process N, already renamed M`, then a line `== Stage N of 3: ...` before each stage, then the output of that stage.
 - Exit code: `0` if no document failed, `1` if one or more documents failed in any stage, `2` for incorrect arguments (missing folder, missing or unloadable model file, unavailable OCR engine), `3` if two or more documents in one folder have the same content (no change made).
@@ -172,6 +173,42 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
 - Options: `--output-dir` and `--model` (the defaults shown in the interface), `--host` (default `127.0.0.1`), `--port` (default `8765`, `0` for a free port), `--no-browser`.
 - Status of a folder: `Queued`, `Running`, `Done` (exit code 0), `Done with errors` (exit code 1: some documents failed, see the log), `Failed` (other exit code, for example a model file that cannot load, or duplicate documents in one folder), `Cancelled`.
 - The queue and the logs are kept in memory only. They are lost when the server stops. The JSON files stay in the decisions folder.
+
+#### Summary log
+
+- When a folder starts and no queue run is open, a queue run starts. It gets a new file `logs<N>.txt` in the parent folder of that folder (for `~/Documents/2025`, in `~/Documents`). `N` is one more than the highest `N` there (`logs1.txt`, then `logs2.txt`, ...).
+- After each folder finishes, the file is written again with that folder added. The log of each folder shows the path (`Summary log: ...`).
+- When no folder is queued, the queue run ends and the file does not change again (`Finished:` gets the time). The next folder added starts a new file.
+- A folder cancelled before it started is not in the file.
+- A folder succeeds only with the status `Done`. `Done with errors`, `Failed` and `Cancelled` count as failed.
+
+```
+Started: 2026-11-20 10:00:00
+Finished: 2026-11-20 10:30:00
+Jobs succeeded: 1
+Jobs failed: 1
+
+- 2025: Done
+- 2026: Failed (exit code 3)
+
+Details
+
+1. 2025
+Folder: /Users/me/Documents/2025
+Result: Done
+Number of files processed: 5
+Number of files skipped: 3 (already renamed 2, unsupported type 1)
+Number of files failed: 0
+
+2. 2026
+Folder: /Users/me/Documents/2026
+Result: Failed (exit code 3)
+Number of files processed: 0
+Number of files skipped: 0 (already renamed 0, unsupported type 0)
+Number of files failed: 2
+```
+
+- `Number of files: not known (the run stopped before the end)`: the run was cancelled, or stopped with exit code `2` (for example a model file that cannot load).
 
 ### Start the web interface with a double-click
 

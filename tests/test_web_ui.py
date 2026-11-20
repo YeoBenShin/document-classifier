@@ -17,22 +17,28 @@ from conftest import PageLines
 from doc_categoriser.webui import Job, JobQueue, WebUiSettings, create_web_server, pipeline_command
 
 FAKE_PIPELINE_SCRIPT = """
-import pathlib, sys, time
+import pathlib, shutil, sys, time
 input_dir = pathlib.Path(sys.argv[1])
+summary_path = pathlib.Path(sys.argv[2])
 print(f"working on {input_dir.name}", flush=True)
 print("a line on stderr", file=sys.stderr, flush=True)
 deadline = time.monotonic() + 60
 while not (input_dir / "release").exists() and time.monotonic() < deadline:
     time.sleep(0.05)
 print("done", flush=True)
+if (input_dir / "counts.json").exists():
+    shutil.copyfile(input_dir / "counts.json", summary_path)
 exit_code_file = input_dir / "exit_code"
 sys.exit(int(exit_code_file.read_text()) if exit_code_file.exists() else 0)
 """
 
 
 def fake_pipeline_command(job: Job) -> list[str]:
-    """Return a command that logs, waits until the file `release` is in the job folder, then exits with the code in `exit_code`."""
-    return [sys.executable, "-u", "-c", FAKE_PIPELINE_SCRIPT, str(job.input_dir)]
+    """
+    Return a command that logs, waits until the file `release` is in the job folder, copies `counts.json` of the job folder
+    to the summary file of the job, then exits with the code in `exit_code`.
+    """
+    return [sys.executable, "-u", "-c", FAKE_PIPELINE_SCRIPT, str(job.input_dir), str(job.summary_path)]
 
 
 class WebUi:
@@ -173,6 +179,92 @@ def test_queued_folders_run_one_after_another_and_show_their_logs(
     assert Path(first["work_dir"]) != Path(second["work_dir"])
 
 
+def write_counts(folder: Path, processed: int, already_renamed: int, unsupported: int, failed: int) -> None:
+    """Write the counts that the fake pipeline gives as its run summary for `folder`."""
+    counts = {
+        "processed": processed,
+        "skipped_already_renamed": already_renamed,
+        "skipped_unsupported": unsupported,
+        "failed": failed,
+    }
+    (folder / "counts.json").write_text(json.dumps(counts), encoding="utf-8")
+
+
+def test_each_queue_run_writes_one_summary_log_in_the_parent_of_the_input_folders(
+    web_ui: WebUi, tmp_path: Path, root_dir: Path, model_file: Path
+) -> None:
+    decisions_dir = tmp_path / "decisions"
+    write_counts(root_dir / "2025", processed=5, already_renamed=2, unsupported=1, failed=0)
+    write_counts(root_dir / "2026", processed=3, already_renamed=0, unsupported=0, failed=2)
+    (root_dir / "2026" / "exit_code").write_text("1")
+    first, second = web_ui.submit([root_dir / "2025", root_dir / "2026"], decisions_dir, model_file)
+    web_ui.wait_until(lambda: web_ui.job(first["id"])["status"] == "running")
+    log_path = root_dir / "logs1.txt"
+
+    started_log = log_path.read_text(encoding="utf-8")
+    (root_dir / "2025" / "release").touch()
+    web_ui.wait_until(lambda: web_ui.job(first["id"])["status"] == "succeeded")
+    web_ui.wait_until(lambda: web_ui.job(second["id"])["status"] == "running")
+    log_after_first_job = log_path.read_text(encoding="utf-8")
+    (root_dir / "2026" / "release").touch()
+    web_ui.wait_until(lambda: web_ui.job(second["id"])["status"] == "finished_with_errors")
+
+    assert "Jobs succeeded: 0\nJobs failed: 0\n" in started_log
+    assert "Finished: not yet" in started_log
+    assert "Jobs succeeded: 1\nJobs failed: 0\n" in log_after_first_job
+    assert "- 2026:" not in log_after_first_job
+    final_log = log_path.read_text(encoding="utf-8")
+    assert final_log.startswith("Started: ")
+    assert "Finished: not yet" not in final_log
+    assert "Jobs succeeded: 1\nJobs failed: 1\n\n- 2025: Done\n- 2026: Done with errors\n" in final_log
+    assert (
+        f"1. 2025\nFolder: {(root_dir / '2025').resolve()}\nResult: Done\n"
+        "Number of files processed: 5\n"
+        "Number of files skipped: 3 (already renamed 2, unsupported type 1)\n"
+        "Number of files failed: 0\n"
+    ) in final_log
+    assert (
+        "2. 2026\n"
+        f"Folder: {(root_dir / '2026').resolve()}\nResult: Done with errors\n"
+        "Number of files processed: 3\n"
+        "Number of files skipped: 0 (already renamed 0, unsupported type 0)\n"
+        "Number of files failed: 2\n"
+    ) in final_log
+    assert web_ui.job(first["id"])["summary_log_path"] == str(log_path.resolve())
+    assert f"Summary log: {log_path.resolve()}" in web_ui.log(second["id"])
+
+    [third] = web_ui.submit([root_dir / "2025"], decisions_dir, model_file)
+    web_ui.wait_until(lambda: web_ui.job(third["id"])["status"] == "succeeded")
+
+    assert web_ui.job(third["id"])["summary_log_path"] == str((root_dir / "logs2.txt").resolve())
+    second_run_log = (root_dir / "logs2.txt").read_text(encoding="utf-8")
+    assert not list(decisions_dir.glob("logs*.txt"))
+    assert "Jobs succeeded: 1\nJobs failed: 0\n\n- 2025: Done\n\n" in second_run_log
+    assert log_path.read_text(encoding="utf-8") == final_log
+
+
+def test_summary_log_counts_failed_and_cancelled_jobs_as_failed(
+    web_ui: WebUi, tmp_path: Path, root_dir: Path, model_file: Path
+) -> None:
+    decisions_dir = tmp_path / "decisions"
+    (root_dir / "logs7.txt").write_text("an earlier queue run", encoding="utf-8")
+    (root_dir / "2026" / "exit_code").write_text("3")
+    (root_dir / "2026" / "release").touch()
+    first, second, third = web_ui.submit(
+        [root_dir / "2025", root_dir / "2026", root_dir / "2026" / "march"], decisions_dir, model_file
+    )
+    web_ui.wait_until(lambda: web_ui.job(first["id"])["status"] == "running")
+    web_ui.request("POST", f"/api/jobs/{third['id']}/cancel", {})
+    web_ui.request("POST", f"/api/jobs/{first['id']}/cancel", {})
+    web_ui.wait_until(lambda: web_ui.job(second["id"])["status"] == "failed")
+    web_ui.wait_until(lambda: "Finished: not yet" not in (root_dir / "logs8.txt").read_text(encoding="utf-8"))
+
+    log = (root_dir / "logs8.txt").read_text(encoding="utf-8")
+    assert "Jobs succeeded: 0\nJobs failed: 2\n\n- 2025: Cancelled\n- 2026: Failed (exit code 3)\n\n" in log
+    assert "march" not in log
+    assert log.count("Number of files: not known (the run stopped before the end)") == 2
+
+
 def test_log_can_be_read_from_a_line_number(web_ui: WebUi, root_dir: Path, tmp_path: Path, model_file: Path) -> None:
     (root_dir / "2025" / "release").touch()
     [job] = web_ui.submit([root_dir / "2025"], tmp_path / "decisions", model_file)
@@ -293,3 +385,8 @@ def test_queued_folder_is_extracted_named_and_renamed_with_the_real_pipeline(
         assert f"Renamed: scan_0001.pdf.json: scan_0001.pdf -> {new_name}" in log
         assert "Renamed 1, already renamed 0, failed 0" in log
         assert not Path(job["work_dir"]).exists()
+        summary_log = (tmp_path / "logs1.txt").read_text(encoding="utf-8")
+        assert "Jobs succeeded: 1\nJobs failed: 0\n\n- inbox: Done\n" in summary_log
+        assert "Number of files processed: 1\n" in summary_log
+        assert "Number of files skipped: 0 (already renamed 0, unsupported type 0)\n" in summary_log
+        assert "Number of files failed: 0\n" in summary_log

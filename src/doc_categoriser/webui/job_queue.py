@@ -1,15 +1,21 @@
-"""A queue that runs one pipeline child process at a time, keeps the log of each, and can cancel a job."""
+"""
+A queue that runs one pipeline child process at a time, keeps the log of each, and can cancel a job.
+Each queue run (from the first job that starts until the queue is empty) gets one summary log file.
+"""
 
 import datetime
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from doc_categoriser.webui.summary_log import JobSummary, SummaryLog, read_document_counts
 
 
 class JobStatus(StrEnum):
@@ -32,12 +38,17 @@ class JobAlreadyFinishedError(Exception):
 
 @dataclass
 class Job:
-    """One folder to run through the pipeline. `work_dir` receives the extracted and the name suggestion JSON files."""
+    """
+    One folder to run through the pipeline. `work_dir` receives the extracted and the name suggestion JSON files.
+    `summary_path` receives the document counts of the run. `summary_log_path` is the summary log of the queue run of the job.
+    """
 
     id: int
     input_dir: Path
     work_dir: Path
     model_path: Path
+    summary_path: Path
+    summary_log_path: Path | None = None
     status: JobStatus = JobStatus.QUEUED
     exit_code: int | None = None
     log_lines: list[str] = field(default_factory=lambda: [])
@@ -52,6 +63,7 @@ class Job:
             "status": self.status.value,
             "exit_code": self.exit_code,
             "log_line_count": len(self.log_lines),
+            "summary_log_path": str(self.summary_log_path) if self.summary_log_path else None,
         }
 
 
@@ -71,6 +83,8 @@ def pipeline_command(job: Job) -> list[str]:
         str(job.work_dir),
         "--model",
         str(job.model_path),
+        "--summary-file",
+        str(job.summary_path),
     ]
 
 
@@ -87,6 +101,8 @@ class JobQueue:
     """
     Runs submitted jobs one at a time, in the order of submission, each in a child process from `build_command`.
     The standard output and standard error of the child are kept as the job log. All methods are thread-safe.
+    When a job starts and no queue run is open, a queue run starts: a new `logs<N>.txt` in the parent folder of the
+    job input folder. Each job that ran is added to it when it finishes. The queue run ends when no job is queued.
     """
 
     def __init__(self, build_command: CommandBuilder) -> None:
@@ -97,6 +113,8 @@ class JobQueue:
         self._lock = threading.Lock()
         self._job_added = threading.Condition(self._lock)
         self._closed = False
+        self._summary_dir = tempfile.TemporaryDirectory(prefix="doc-categoriser-summaries-")
+        self._summary_log: SummaryLog | None = None
         self._worker = threading.Thread(target=self._run_jobs, name="pipeline-job-queue", daemon=True)
         self._worker.start()
 
@@ -113,6 +131,7 @@ class JobQueue:
                 input_dir=input_dir.resolve(),
                 work_dir=output_dir.resolve() / f"{input_dir.resolve().name}-{timestamp}-{job_id}",
                 model_path=model_path.resolve(),
+                summary_path=Path(self._summary_dir.name) / f"job-{job_id}.json",
             )
             self._jobs.append(job)
             self._job_added.notify()
@@ -155,6 +174,8 @@ class JobQueue:
                 self._running_process.terminate()
             self._job_added.notify()
         self._worker.join(timeout=10)
+        if not self._worker.is_alive():
+            self._summary_dir.cleanup()
 
     def _find_job(self, job_id: int) -> Job:
         """Return the job with `job_id`. The caller holds the lock. Raise KeyError if there is none."""
@@ -179,8 +200,41 @@ class JobQueue:
         while (job := self._next_queued_job()) is not None:
             self._run_job(job)
 
+    def _open_summary_log(self, job: Job) -> None:
+        """Start a queue run if none is open, and give `job` its summary log path. The caller holds the lock."""
+        if self._summary_log is None:
+            try:
+                self._summary_log = SummaryLog(job.input_dir.parent)
+            except OSError as error:
+                job.log_lines.append(f"Cannot write the summary log in {job.input_dir.parent}: {error}")
+                return
+        job.summary_log_path = self._summary_log.path
+        job.log_lines.append(f"Summary log: {self._summary_log.path}")
+
+    def _close_job_in_summary_log(self, job: Job) -> None:
+        """
+        Add the finished `job` to the summary log, and end the queue run if no job is queued or the queue is closed.
+        The caller holds the lock.
+        """
+        counts = read_document_counts(job.summary_path)
+        job.summary_path.unlink(missing_ok=True)
+        summary_log = self._summary_log
+        if summary_log is None:
+            return
+        queue_run_ends = self._closed or not any(other.status is JobStatus.QUEUED for other in self._jobs)
+        if queue_run_ends:
+            self._summary_log = None
+        try:
+            summary_log.add_job(JobSummary(job.input_dir, job.status.value, job.exit_code, counts))
+            if queue_run_ends:
+                summary_log.finish()
+        except OSError as error:
+            job.log_lines.append(f"Cannot write the summary log {summary_log.path}: {error}")
+
     def _run_job(self, job: Job) -> None:
-        """Run the child process of `job`, keep its output as the log, and set the final status."""
+        """Run the child process of `job`, keep its output as the log, set the final status, and add it to the summary log."""
+        with self._lock:
+            self._open_summary_log(job)
         command = self._build_command(job)
         try:
             process = subprocess.Popen(
@@ -198,6 +252,7 @@ class JobQueue:
             with self._lock:
                 job.log_lines.append(f"Cannot start the pipeline: {error}")
                 job.status = JobStatus.FAILED
+                self._close_job_in_summary_log(job)
             return
         with self._lock:
             self._running_process = process
@@ -217,3 +272,4 @@ class JobQueue:
             else:
                 job.status = status_for_exit_code(exit_code)
                 job.log_lines.append(f"Finished with exit code {exit_code}.")
+            self._close_job_in_summary_log(job)

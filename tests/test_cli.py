@@ -578,10 +578,17 @@ def test_run_extracts_names_and_renames_then_deletes_its_work_folder(
         [["DBS Bank Statement", "Statement period 01/03/2026 - 31/03/2026", "Closing balance 980.40"]],
     ).rename(input_dir / "scan_0001.pdf")
     work_dir = tmp_path / "renaming-decision" / "inbox-run"
+    summary_file = tmp_path / "summary.json"
 
-    result = run_pipeline(input_dir, work_dir, "--model", test_model_path)
+    result = run_pipeline(input_dir, work_dir, "--model", test_model_path, "--summary-file", summary_file)
 
     assert result.returncode == 0, result.stderr
+    assert json.loads(summary_file.read_text(encoding="utf-8")) == {
+        "processed": 1,
+        "skipped_already_renamed": 0,
+        "skipped_unsupported": 0,
+        "failed": 0,
+    }
     assert not work_dir.exists()
     assert (tmp_path / "renaming-decision").is_dir()
     [new_name] = file_names(input_dir)
@@ -616,11 +623,19 @@ def test_run_reports_failed_documents_renames_the_others_and_exits_non_zero(
     input_dir = tmp_path / "inbox"
     input_dir.mkdir()
     (input_dir / "a_broken.pdf").write_bytes(b"this is not a pdf")
+    (input_dir / "notes.txt").write_text("not a document", encoding="utf-8")
     make_text_pdf("statement.pdf", [["DBS Bank Statement", "Closing balance 980.40"]]).rename(input_dir / "statement.pdf")
+    summary_file = tmp_path / "summary.json"
 
-    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path, "--summary-file", summary_file)
 
     assert result.returncode == 1
+    assert json.loads(summary_file.read_text(encoding="utf-8")) == {
+        "processed": 1,
+        "skipped_already_renamed": 0,
+        "skipped_unsupported": 1,
+        "failed": 1,
+    }
     assert "Failed: a_broken.pdf" in result.stderr
     assert "Renamed 1, already renamed 0, failed 0" in result.stdout
     assert "a_broken.pdf" in file_names(input_dir)
@@ -678,9 +693,17 @@ def test_run_again_leaves_out_the_documents_its_rename_history_shows_as_done(
     assert (record["original_name"], record["new_name"]) == ("statement.pdf", new_name)
     assert (record["method"], record["ocr_engine"], record["model"]) == ("text_layer", None, test_model_path.name)
 
-    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+    summary_file = tmp_path / "summary.json"
+
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path, "--summary-file", summary_file)
 
     assert result.returncode == 0, result.stderr
+    assert json.loads(summary_file.read_text(encoding="utf-8")) == {
+        "processed": 0,
+        "skipped_already_renamed": 1,
+        "skipped_unsupported": 0,
+        "failed": 0,
+    }
     assert f"Already renamed (rename history): {new_name}" in result.stdout
     assert "To process 0, already renamed 1" in result.stdout
     assert "Extracted 0, skipped 0, failed 0" in result.stdout
@@ -797,10 +820,12 @@ def test_run_stops_before_any_change_when_two_documents_of_a_folder_have_the_sam
     (input_dir / "2026" / "statement.pdf").write_bytes(statement.read_bytes())
     (input_dir / "notes.txt").write_text("same", encoding="utf-8")
     (input_dir / "notes copy.txt").write_text("same", encoding="utf-8")
+    summary_file = tmp_path / "summary.json"
 
-    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path)
+    result = run_pipeline(input_dir, tmp_path / "work", "--model", test_model_path, "--summary-file", summary_file)
 
     assert result.returncode == 3
+    assert json.loads(summary_file.read_text(encoding="utf-8"))["failed"] == 2
     assert (
         "Duplicate: these files in one folder have the same content: statement copy.pdf, statement.pdf" in result.stderr
     )

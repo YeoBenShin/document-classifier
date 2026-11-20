@@ -8,10 +8,11 @@ Command-line interface:
 """
 
 import argparse
+import json
 import shutil
 import sys
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from doc_categoriser.classification import DocumentNamer, LlamaCppNamer, suggest_document_name, unique_name
@@ -51,6 +52,42 @@ from doc_categoriser.renaming import (
 
 DUPLICATE_DOCUMENTS_EXIT_CODE = 3
 """Exit code of `run` when two or more documents in one folder have the same content. The run stops before any change."""
+
+
+@dataclass(frozen=True)
+class StageCounts:
+    """The number of documents of one stage that were done, skipped and failed."""
+
+    done: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+    @property
+    def exit_code(self) -> int:
+        """Return 1 if one or more documents failed, otherwise 0."""
+        return 1 if self.failed else 0
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """
+    The document counts of one `run`, as written to `--summary-file`. `processed`: documents that have their new name
+    at the end (renamed, or already renamed at the rename stage). `skipped_already_renamed`: documents left out by the
+    rename history. `skipped_unsupported`: files of an unsupported type. `failed`: documents that failed in any stage.
+    """
+
+    processed: int
+    skipped_already_renamed: int
+    skipped_unsupported: int
+    failed: int
+
+
+def write_run_summary(summary_path: Path | None, summary: RunSummary) -> None:
+    """Write `summary` as JSON to `summary_path`. Do nothing if `summary_path` is None."""
+    if summary_path is None:
+        return
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(asdict(summary), indent=2) + "\n", encoding="utf-8")
 
 
 def positive_integer(text: str) -> int:
@@ -122,6 +159,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     add_ocr_engine_argument(run_command)
     add_model_arguments(run_command)
+    run_command.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="Write the document counts of the run (processed, skipped, failed) to this JSON file at the end.",
+    )
 
     web_command = subcommands.add_parser(
         "web", help="Open a browser interface to queue folders for the full pipeline (extract, name, rename)."
@@ -174,11 +217,11 @@ def run_extract(
     extractors: list[DocumentExtractor],
     ocr_engine: str,
     source_files: list[Path] | None = None,
-) -> int:
+) -> StageCounts:
     """
     Extract each file of `source_files` (default: every file under `input_dir`) into JSON files under `output_dir`.
     Each JSON file records `ocr_engine` as the OCR engine. Unsupported files are skipped.
-    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
+    A file that fails is reported and the run continues. Return the counts of extracted, skipped and failed files.
     """
     extracted_count = skipped_count = failed_count = 0
     for source_path in find_source_files(input_dir) if source_files is None else source_files:
@@ -201,7 +244,7 @@ def run_extract(
         print(f"Extracted: {display_name}", flush=True)
         extracted_count += 1
     print(f"Extracted {extracted_count}, skipped {skipped_count}, failed {failed_count}", flush=True)
-    return 1 if failed_count else 0
+    return StageCounts(done=extracted_count, skipped=skipped_count, failed=failed_count)
 
 
 def extraction_method(document: ExtractedDocument) -> str:
@@ -211,12 +254,12 @@ def extraction_method(document: ExtractedDocument) -> str:
     return TEXT_LAYER_METHOD
 
 
-def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer, model_name: str) -> int:
+def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer, model_name: str) -> StageCounts:
     """
     Suggest a name for every `.json` file under `input_dir` and write one name suggestion JSON file for each under `output_dir`.
     Each name suggestion JSON file records the extraction method, the OCR engine (only for the `ocr` method) and `model_name`.
     Documents from the same folder never get the same name. A file that fails is reported and the run continues.
-    Return 1 if any file failed, otherwise 0.
+    Return the counts of named and failed files.
     """
     named_count = failed_count = 0
     names_in_use_by_folder: dict[Path, set[str]] = {}
@@ -247,16 +290,17 @@ def run_name(input_dir: Path, output_dir: Path, namer: DocumentNamer, model_name
         print(f"Named: {display_name} -> {suggestion.name}", flush=True)
         named_count += 1
     print(f"Named {named_count}, failed {failed_count}", flush=True)
-    return 1 if failed_count else 0
+    return StageCounts(done=named_count, failed=failed_count)
 
 
-def run_rename(input_dir: Path, dry_run: bool) -> int:
+def run_rename(input_dir: Path, dry_run: bool) -> StageCounts:
     """
     Rename the source document of every `.json` file under `input_dir` to `<folder>-<suggested name>`, in the folder where it is.
     With `dry_run`, change no file. No file is overwritten, and no two documents get the same new name in one folder.
     Each rename adds a line to the rename history of the folder, with the SHA-256 of the file. A document found already renamed
     adds a line only if the last line for its SHA-256 has another new name, method, OCR engine or model. With `dry_run`, no line is added.
-    A file that fails is reported and the run continues. Return 1 if any file failed, otherwise 0.
+    A file that fails is reported and the run continues. Return the counts: `done` holds the renamed and the already
+    renamed documents, `skipped` the already renamed documents only.
     """
     renamed_label = "Would rename" if dry_run else "Renamed"
     renamed_count = already_renamed_count = failed_count = 0
@@ -301,7 +345,7 @@ def run_rename(input_dir: Path, dry_run: bool) -> int:
             print(f"{renamed_label}: {display_name}: {source_path.name} -> {new_name}", flush=True)
             renamed_count += 1
     print(f"{renamed_label} {renamed_count}, already renamed {already_renamed_count}, failed {failed_count}", flush=True)
-    return 1 if failed_count else 0
+    return StageCounts(done=renamed_count + already_renamed_count, skipped=already_renamed_count, failed=failed_count)
 
 
 def _same_result(last_record: RenameRecord | None, record: RenameRecord) -> bool:
@@ -330,10 +374,10 @@ def hash_documents(source_files: list[Path], supported_suffixes: set[str]) -> di
     return hashes
 
 
-def report_duplicate_documents(input_dir: Path, hashes: dict[Path, str]) -> bool:
+def report_duplicate_documents(input_dir: Path, hashes: dict[Path, str]) -> int:
     """
     Print on stderr each group of two or more files in one folder with the same SHA-256 in `hashes`.
-    Return True if there is one or more groups.
+    Return the number of files in all groups (0 if there is no group).
     """
     groups: dict[tuple[Path, str], list[Path]] = {}
     for source_path, sha256 in hashes.items():
@@ -348,7 +392,7 @@ def report_duplicate_documents(input_dir: Path, hashes: dict[Path, str]) -> bool
             file=sys.stderr,
             flush=True,
         )
-    return bool(duplicate_groups)
+    return sum(len(paths) for paths in duplicate_groups)
 
 
 def select_files_to_process(
@@ -395,6 +439,7 @@ def run_pipeline(
     ocr_engine: str,
     namer: DocumentNamer,
     model_name: str,
+    summary_path: Path | None = None,
 ) -> int:
     """
     Hash the documents and check the rename history of each folder, then run extraction into `<work_dir>/extracted`, naming into `<work_dir>/named`,
@@ -403,12 +448,16 @@ def run_pipeline(
     DUPLICATE_DOCUMENTS_EXIT_CODE. When the renaming stage has finished, `<work_dir>/extracted` and `<work_dir>/named` are deleted, then
     `work_dir` if it is empty. Files under `work_dir` are not extracted. A failed document does not stop the run:
     the next stages use the documents that did not fail. Return 1 if any document failed in any stage, otherwise 0.
+    At the end (also at the stop for duplicate documents), write the document counts to `summary_path` if it is given.
+    The duplicate documents count as failed.
     """
     print(f"== Rename history: {input_dir.resolve()} (model {model_name}, OCR engine {ocr_engine})", flush=True)
     all_source_files = find_source_files(input_dir, work_dir)
     supported_suffixes = {suffix for extractor in extractors for suffix in extractor.supported_suffixes}
     hashes = hash_documents(all_source_files, supported_suffixes)
-    if report_duplicate_documents(input_dir, hashes):
+    duplicate_count = report_duplicate_documents(input_dir, hashes)
+    if duplicate_count:
+        write_run_summary(summary_path, RunSummary(0, 0, 0, failed=duplicate_count))
         return DUPLICATE_DOCUMENTS_EXIT_CODE
     extracted_dir = work_dir / "extracted"
     named_dir = work_dir / "named"
@@ -416,18 +465,27 @@ def run_pipeline(
     named_dir.mkdir(parents=True, exist_ok=True)
     source_files = select_files_to_process(input_dir, all_source_files, hashes, ocr_engine, model_name)
     print(f"== Stage 1 of 3: Extraction: {input_dir.resolve()} -> {extracted_dir.resolve()}", flush=True)
-    extract_status = run_extract(input_dir, extracted_dir, extractors, ocr_engine, source_files)
+    extract_counts = run_extract(input_dir, extracted_dir, extractors, ocr_engine, source_files)
     print(f"== Stage 2 of 3: Naming: {extracted_dir.resolve()} -> {named_dir.resolve()}", flush=True)
-    name_status = run_name(extracted_dir, named_dir, namer, model_name)
+    name_counts = run_name(extracted_dir, named_dir, namer, model_name)
     print(f"== Stage 3 of 3: Renaming: {named_dir.resolve()}", flush=True)
-    rename_status = run_rename(named_dir, dry_run=False)
+    rename_counts = run_rename(named_dir, dry_run=False)
     shutil.rmtree(extracted_dir)
     print(f"Deleted the extracted JSON files: {extracted_dir.resolve()}", flush=True)
     shutil.rmtree(named_dir)
     print(f"Deleted the name suggestion JSON files: {named_dir.resolve()}", flush=True)
     if not any(work_dir.iterdir()):
         work_dir.rmdir()
-    return max(extract_status, name_status, rename_status)
+    write_run_summary(
+        summary_path,
+        RunSummary(
+            processed=rename_counts.done,
+            skipped_already_renamed=len(all_source_files) - len(source_files),
+            skipped_unsupported=extract_counts.skipped,
+            failed=extract_counts.failed + name_counts.failed + rename_counts.failed,
+        ),
+    )
+    return max(extract_counts.exit_code, name_counts.exit_code, rename_counts.exit_code)
 
 
 def create_extractors_or_exit(
@@ -463,9 +521,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"{arguments.input_dir} is not a folder")
     if arguments.command == "extract":
         engine_name, extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
-        return run_extract(arguments.input_dir, arguments.output_dir, extractors, engine_name)
+        return run_extract(arguments.input_dir, arguments.output_dir, extractors, engine_name).exit_code
     if arguments.command == "rename":
-        return run_rename(arguments.input_dir, arguments.dry_run)
+        return run_rename(arguments.input_dir, arguments.dry_run).exit_code
     if arguments.command == "web":
         from doc_categoriser.webui import serve_web_ui
 
@@ -481,7 +539,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         engine_name, extractors = create_extractors_or_exit(parser, arguments.ocr_engine)
         namer = load_namer_or_exit(parser, arguments.model, arguments.max_document_tokens)
         return run_pipeline(
-            arguments.input_dir, arguments.work_dir, extractors, engine_name, namer, arguments.model.name
+            arguments.input_dir,
+            arguments.work_dir,
+            extractors,
+            engine_name,
+            namer,
+            arguments.model.name,
+            arguments.summary_file,
         )
     namer = load_namer_or_exit(parser, arguments.model, arguments.max_document_tokens)
-    return run_name(arguments.input_dir, arguments.output_dir, namer, arguments.model.name)
+    return run_name(arguments.input_dir, arguments.output_dir, namer, arguments.model.name).exit_code
