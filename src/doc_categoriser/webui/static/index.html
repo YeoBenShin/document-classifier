@@ -81,7 +81,10 @@
       <input type="text" id="current-path" spellcheck="false" aria-label="Current folder">
       <button id="go-button">Open</button>
     </div>
-    <label class="row" style="margin-top:8px"><input type="checkbox" id="select-current"> Select this folder</label>
+    <div class="row" style="margin-top:8px; justify-content:space-between">
+      <label class="row"><input type="checkbox" id="select-current"> Select this folder</label>
+      <button id="select-all-button" title="Select or clear every subfolder in this list">Select all</button>
+    </div>
     <ul class="folder-list" id="folder-list"></ul>
     <div class="muted">Selected folders (each runs extraction, naming and renaming):</div>
     <div class="chips" id="selected-folders"></div>
@@ -138,11 +141,24 @@ function toggleSelection(path, selected) {
   renderFolders();
 }
 
+function toggleAllSubfolders() {
+  const paths = state.listing.folders.map((folder) => folder.path);
+  const allSelected = paths.every((path) => state.selected.has(path));
+  for (const path of paths) {
+    if (allSelected) state.selected.delete(path); else state.selected.add(path);
+  }
+  renderFolders();
+}
+
 function renderFolders() {
   const listing = state.listing;
   element("current-path").value = listing.path;
   element("up-button").disabled = !listing.parent;
   element("select-current").checked = state.selected.has(listing.path);
+  const selectAllButton = element("select-all-button");
+  const allSubfoldersSelected = listing.folders.length && listing.folders.every((folder) => state.selected.has(folder.path));
+  selectAllButton.disabled = !listing.folders.length;
+  selectAllButton.textContent = allSubfoldersSelected ? "Clear all" : "Select all";
   const list = element("folder-list");
   list.replaceChildren();
   if (!listing.folders.length) {
@@ -303,6 +319,7 @@ async function start() {
   element("go-button").addEventListener("click", () => openFolder(element("current-path").value.trim()));
   element("current-path").addEventListener("keydown", (event) => { if (event.key === "Enter") openFolder(event.target.value.trim()); });
   element("select-current").addEventListener("change", (event) => toggleSelection(state.listing.path, event.target.checked));
+  element("select-all-button").addEventListener("click", toggleAllSubfolders);
   element("queue-button").addEventListener("click", queueSelected);
   await openFolder(config.root_dir);
   poll();

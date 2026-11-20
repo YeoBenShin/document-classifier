@@ -163,7 +163,7 @@ uv run doc-categoriser web ~/Documents/inbox    # opens at this folder
 
 - Starts a local web server and opens the interface in the web browser. Stop it with Ctrl+C (this cancels the running folder).
 - In the interface:
-  - Browse folders (click a name to open it, `Up` for the parent, or type a path). Select one or more folders with the checkboxes, then `Add to queue`.
+  - Browse folders (click a name to open it, `Up` for the parent, or type a path). Select one or more folders with the checkboxes, or `Select all` for every subfolder in the list (`Clear all` to undo), then `Add to queue`.
   - Each queued folder runs `doc-categoriser run` in a child process. One folder runs at a time, in queue order.
   - Click a folder in the queue to see its log, live.
   - `Cancel` removes a queued folder, or stops the running one. Documents renamed before the cancel keep their new names. Run the folder again to continue: the documents that the rename history shows as done are left out, and the others are extracted, named and renamed.
